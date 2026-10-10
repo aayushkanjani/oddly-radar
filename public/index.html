@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Oddly Radar · Smart money in prediction markets</title>
+<meta name="description" content="See what the sharpest Polymarket traders are buying, live. Leaderboards, wallet tracking and whale alerts.">
+<meta property="og:title" content="Oddly Radar">
+<meta property="og:description" content="See what the sharpest prediction-market traders are buying, live.">
+<meta name="twitter:card" content="summary">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@800&family=Figtree:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body data-page="home">
+<div class="wrap">
+  <header class="top">
+    <a class="logo" href="/"><span class="o">%</span>oddly <small>radar</small></a>
+    <div class="spacer"></div>
+    <form class="find" id="find" role="search">
+      <input id="findInput" placeholder="Look up a wallet: 0x…" aria-label="Wallet address" autocomplete="off" spellcheck="false">
+      <button class="btn" type="submit">Track</button>
+    </form>
+  </header>
+
+  <section class="hero">
+    <h1>See what the <em>sharpest</em> prediction-market traders are buying.</h1>
+    <p>Live leaderboards and whale trades from Polymarket's public data. Tap any trader to see every position they hold.</p>
+    <div class="ctas">
+      <a class="btn yellow" data-cfg="telegramUrl" href="#" target="_blank" rel="noopener">Get whale alerts on Telegram</a>
+      <a class="btn" data-cfg="waitlistUrl" href="#" target="_blank" rel="noopener">Join the Pro waitlist</a>
+    </div>
+  </section>
+
+  <div class="grid">
+    <section class="panel">
+      <div class="ph">
+        <h2>Top traders</h2>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <div class="seg" id="period" role="group" aria-label="Time period">
+            <button type="button" data-v="day" aria-pressed="false">24h</button>
+            <button type="button" data-v="week" aria-pressed="true">7d</button>
+            <button type="button" data-v="month" aria-pressed="false">30d</button>
+          </div>
+          <div class="seg" id="sort" role="group" aria-label="Rank by">
+            <button type="button" data-v="pnl" aria-pressed="true">Profit</button>
+            <button type="button" data-v="volume" aria-pressed="false">Volume</button>
+          </div>
+        </div>
+      </div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>#</th><th>Trader</th><th class="r">Profit</th><th class="r">Volume</th></tr></thead>
+        <tbody id="board"></tbody>
+      </table></div>
+    </section>
+
+    <section class="panel">
+      <div class="ph">
+        <h2><span class="live" aria-hidden="true"></span>Whale trades</h2>
+        <label class="muted" style="font-size:13px">Over
+          <select id="minUsd" aria-label="Minimum trade size">
+            <option value="5000">$5k</option>
+            <option value="10000" selected>$10k</option>
+            <option value="50000">$50k</option>
+            <option value="100000">$100k</option>
+          </select>
+        </label>
+      </div>
+      <ul class="feed" id="whales"></ul>
+      <div class="muted" style="font-size:12px;padding:8px 16px;border-top:1px solid var(--line)" id="whalesAt">Refreshes every 30 seconds</div>
+    </section>
+  </div>
+
+  <section class="panel gaps" id="gapsSection" hidden>
+    <div class="ph"><h2>Price gaps: Kalshi vs Polymarket</h2><span class="muted" style="font-size:13px">YES price, mid of bid and ask</span></div>
+    <div id="gaps"></div>
+  </section>
+
+  <footer>Data from Polymarket and Kalshi public APIs. Oddly Radar is independent and not affiliated with either venue. Nothing here is financial advice.</footer>
+</div>
+<script src="/config.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

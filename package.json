@@ -1,0 +1,15 @@
+{
+  "name": "oddly-radar",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Smart-money tracker for prediction markets: Polymarket leaderboards, wallet profiles, whale alerts and cross-venue price gaps.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "node scripts/dev-server.js",
+    "bot": "node bot/whale-alerts.js",
+    "test": "node --test"
+  }
+}

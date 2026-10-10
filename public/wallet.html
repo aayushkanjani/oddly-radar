@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Wallet · Oddly Radar</title>
+<meta name="description" content="Open positions and recent trades for a Polymarket wallet.">
+<meta property="og:title" content="A Polymarket wallet on Oddly Radar">
+<meta property="og:description" content="Open positions, profit and recent trades.">
+<meta name="twitter:card" content="summary">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@800&family=Figtree:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body data-page="wallet">
+<div class="wrap">
+  <header class="top">
+    <a class="logo" href="/"><span class="o">%</span>oddly <small>radar</small></a>
+    <div class="spacer"></div>
+    <form class="find" id="find" role="search">
+      <input id="findInput" placeholder="Look up a wallet: 0x…" aria-label="Wallet address" autocomplete="off" spellcheck="false">
+      <button class="btn" type="submit">Track</button>
+    </form>
+  </header>
+
+  <div class="profile">
+    <span class="avatar" id="profileAvatar" style="background:var(--soft)"></span>
+    <div style="min-width:0;flex:1">
+      <h1 id="profileName">Loading wallet…</h1>
+      <code id="profileAddr"></code>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <a class="btn dark" id="shareX" href="#" target="_blank" rel="noopener">Share on X</a>
+      <button class="btn" type="button" id="copyLink">Copy link</button>
+      <a class="btn" id="polyLink" href="#" target="_blank" rel="noopener">Open on Polymarket</a>
+      <a class="btn yellow" data-cfg="telegramUrl" href="#" target="_blank" rel="noopener">Whale alerts</a>
+    </div>
+  </div>
+  <div class="toast" id="toast" role="status"></div>
+
+  <div class="stats" id="stats"></div>
+
+  <div class="stack">
+    <section class="panel">
+      <div class="ph"><h2>Open positions</h2><span class="muted" style="font-size:13px">Largest first</span></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Market</th><th class="r">Avg entry</th><th class="r">Now</th><th class="r">Value</th><th class="r">P&amp;L</th></tr></thead>
+        <tbody id="positions"><tr><td colspan="5" class="state">Loading positions…</td></tr></tbody>
+      </table></div>
+    </section>
+    <section class="panel">
+      <div class="ph"><h2>Recent trades</h2></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Market</th><th>Side</th><th class="r">Price</th><th class="r">Size</th><th class="r">When</th></tr></thead>
+        <tbody id="trades"><tr><td colspan="5" class="state">Loading trades…</td></tr></tbody>
+      </table></div>
+    </section>
+  </div>
+
+  <footer>Data from Polymarket's public API. Oddly Radar is independent and not affiliated with Polymarket. Nothing here is financial advice.</footer>
+</div>
+<script src="/config.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

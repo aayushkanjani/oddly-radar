@@ -1,0 +1,113 @@
+/* Oddly Radar: a smart-money terminal. Header, then leaderboard beside the live whale feed; wallet pages reuse the same tokens. */
+:root{
+  --bg:#f2f3f8; --panel:#ffffff; --ink:#10142a; --muted:#646b8a; --line:#e0e3ee; --soft:#f6f7fb;
+  --yes:#2353f5; --yes-soft:rgba(35,83,245,.10); --no:#e04a27; --no-soft:rgba(224,74,39,.10);
+  --mark:#ffd23f; --mark-ink:#2a2100; --good:#0f8a63;
+  --display:"Unbounded",ui-sans-serif,system-ui,sans-serif;
+  --body:"Figtree",ui-sans-serif,system-ui,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0e1121; --panel:#161a2f; --ink:#edf0fb; --muted:#8c93b5; --line:#262b46; --soft:#1b2038;
+  --yes:#7090ff; --yes-soft:rgba(112,144,255,.14); --no:#ff7b5c; --no-soft:rgba(255,123,92,.14); --good:#3fd0a0; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0e1121; --panel:#161a2f; --ink:#edf0fb; --muted:#8c93b5; --line:#262b46; --soft:#1b2038;
+  --yes:#7090ff; --yes-soft:rgba(112,144,255,.14); --no:#ff7b5c; --no-soft:rgba(255,123,92,.14); --good:#3fd0a0; color-scheme:dark}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.45}
+a{color:inherit}
+.wrap{max-width:1200px;margin:0 auto;padding-inline:16px;padding-block:18px 48px}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.muted{color:var(--muted)}
+.up{color:var(--good)} .dn{color:var(--no)}
+button,select,input{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--yes);outline-offset:2px}
+
+header.top{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.logo{font-family:var(--display);font-weight:800;font-size:24px;letter-spacing:-.02em;display:flex;align-items:center;gap:8px;text-decoration:none}
+.logo .o{display:inline-grid;place-items:center;width:28px;height:28px;border-radius:50%;background:var(--mark);color:var(--mark-ink);font-size:14px}
+.logo small{font-family:var(--body);font-weight:600;font-size:12px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase}
+.spacer{flex:1}
+form.find{display:flex;gap:6px;flex:0 1 420px;min-width:0}
+form.find input{flex:1;min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:9px 12px;font-family:var(--mono);font-size:13px}
+.btn{border:1px solid var(--line);background:var(--panel);border-radius:10px;padding:9px 14px;font-weight:600;text-decoration:none;display:inline-flex;align-items:center;gap:6px;font-size:14px}
+.btn.dark{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.btn.yellow{background:var(--mark);color:var(--mark-ink);border-color:var(--mark)}
+
+.hero{margin:26px 0 22px;display:grid;gap:10px}
+.hero h1{font-family:var(--display);font-weight:800;font-size:clamp(24px,4.2vw,42px);line-height:1.05;margin:0;letter-spacing:-.03em;max-width:22ch;text-wrap:balance}
+.hero h1 em{font-style:normal;background:var(--mark);color:var(--mark-ink);padding:0 .14em;border-radius:6px}
+.hero p{margin:0;color:var(--muted);max-width:60ch}
+.hero .ctas{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:18px;align-items:start}
+@media (max-width:980px){.grid{grid-template-columns:minmax(0,1fr)}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;min-width:0}
+.ph{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.ph h2{font-size:15px;margin:0;font-weight:700}
+.seg{display:inline-flex;gap:2px;background:var(--soft);border:1px solid var(--line);border-radius:9px;padding:2px}
+.seg button{border:0;background:transparent;border-radius:7px;padding:4px 10px;font-size:13px;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--panel);color:var(--ink);font-weight:600;box-shadow:0 0 0 1px var(--line)}
+select{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:4px 8px;font-size:13px}
+.live{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--good);margin-right:6px;animation:pulse 1.8s infinite}
+@keyframes pulse{50%{opacity:.3}}
+@media (prefers-reduced-motion:reduce){.live{animation:none}}
+
+.tablewrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%}
+th{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);font-weight:600;text-align:left;padding:10px 14px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:11px 14px;border-bottom:1px solid var(--line);vertical-align:middle}
+tbody tr:last-child td{border-bottom:0}
+tbody tr.link{cursor:pointer}
+tbody tr.link:hover{background:var(--soft)}
+.r{text-align:right}
+.rank{font:700 13px var(--mono);color:var(--muted);width:44px}
+.who{display:flex;align-items:center;gap:10px;min-width:0}
+.avatar{width:30px;height:30px;border-radius:50%;flex:0 0 30px;display:grid;place-items:center;font:700 11px var(--mono);color:#fff;overflow:hidden}
+.avatar img{width:100%;height:100%;object-fit:cover}
+.who b{font-weight:600;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:240px}
+.who small{font:12px var(--mono);color:var(--muted)}
+.tick{color:var(--yes);font-size:12px;margin-left:4px}
+
+.feed{list-style:none;margin:0;padding:0;max-height:640px;overflow:auto}
+.feed li{padding:12px 16px;border-bottom:1px solid var(--line);display:grid;gap:4px}
+.feed li:last-child{border-bottom:0}
+.feed .row1{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
+.feed .amt{font:700 16px var(--mono)}
+.feed .q{font-size:13.5px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.pill{display:inline-block;font:700 11px var(--mono);border-radius:6px;padding:2px 6px;vertical-align:1px}
+.pill.buy{background:var(--yes-soft);color:var(--yes)}
+.pill.sell{background:var(--no-soft);color:var(--no)}
+.feed .meta{font-size:12px;color:var(--muted);display:flex;gap:8px;flex-wrap:wrap}
+.feed .meta a{color:var(--muted)}
+
+.state{padding:26px 16px;color:var(--muted);text-align:center}
+.state.err{color:var(--no)}
+.skeleton{height:14px;border-radius:6px;background:var(--soft);margin:12px 16px}
+
+section.gaps{margin-top:18px}
+.gapcard{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line);align-items:center}
+.gapcard:last-child{border-bottom:0}
+.gapnum{font:700 14px var(--mono);border-radius:8px;padding:4px 8px;background:var(--soft)}
+.gapnum.hot{background:var(--mark);color:var(--mark-ink)}
+.warn{color:var(--no);font-size:12.5px;margin-top:4px}
+
+/* wallet page */
+.profile{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:24px 0 18px}
+.profile .avatar{width:56px;height:56px;flex-basis:56px;font-size:15px}
+.profile h1{font-family:var(--display);font-weight:800;font-size:clamp(20px,3.4vw,30px);margin:0;letter-spacing:-.02em;word-break:break-word}
+.profile code{font:13px var(--mono);color:var(--muted);word-break:break-all}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:18px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.stat small{display:block;color:var(--muted);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase}
+.stat b{font:700 20px var(--mono)}
+.mkt{max-width:340px}
+.mkt a{text-decoration:none;font-weight:600}
+.mkt a:hover{text-decoration:underline}
+.mkt small{display:block;color:var(--muted);font-size:12px}
+.stack{display:grid;gap:18px}
+.toast{min-height:20px;font-size:13px;color:var(--muted)}
+footer{margin-top:30px;color:var(--muted);font-size:12.5px;max-width:80ch}
