@@ -1,0 +1,44 @@
+name: Whale alerts
+
+on:
+  schedule:
+    - cron: "*/15 * * * *" # every 15 minutes (GitHub may run it a few minutes late)
+  workflow_dispatch: {} # lets you run it by hand from the Actions tab
+
+concurrency:
+  group: whale-alerts
+  cancel-in-progress: false
+
+jobs:
+  alert:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Remembers which trades were already posted, so nothing is sent twice.
+      - name: Restore seen trades
+        uses: actions/cache/restore@v4
+        with:
+          path: .state
+          key: seen-${{ github.run_id }}
+          restore-keys: seen-
+
+      - name: Post new whale trades
+        run: node bot/whale-alerts.js
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          MIN_USD: ${{ vars.MIN_USD || '10000' }}
+          SITE_URL: ${{ vars.SITE_URL }}
+
+      - name: Save seen trades
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .state
+          key: seen-${{ github.run_id }}
