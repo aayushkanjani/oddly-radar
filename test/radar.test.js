@@ -393,3 +393,31 @@ test("getSmartMoney reads each top wallet and survives a failed wallet", async (
   assert.equal(d.failed, 1);
   assert.equal(d.markets[0].buyerCount, 2);
 });
+
+// ---- v5: Following ----
+import followingHandler, { followingFeed, MAX_WALLETS } from "../api/following.js";
+
+test("followingFeed merges followed traders' trades newest first and counts failures", async () => {
+  const d = await followingFeed(["0xa", "0xb", "0xc"], {
+    getTrades: async (w) => {
+      if (w === "0xc") throw new Error("down");
+      return w === "0xa" ? [{ wallet: w, ts: 100 }, { wallet: w, ts: 300 }] : [{ wallet: w, ts: 200 }];
+    },
+  });
+  assert.deepEqual(d.trades.map((t) => t.ts), [300, 200, 100]);
+  assert.equal(d.failed, 1);
+});
+
+test("following API rejects an empty list and caps, cleans and dedupes wallets", async () => {
+  const bad = fakeRes();
+  await followingHandler({ url: "/api/following?wallets=nope,0x12" }, bad);
+  assert.equal(bad.statusCode, 400);
+
+  const many = Array.from({ length: 30 }, (_, i) => "0x" + i.toString(16).padStart(40, "0"));
+  routes.push([/\/trades\?user=/, []]);
+  const res = fakeRes();
+  await followingHandler({ url: "/api/following?wallets=" + [...many, many[0].toUpperCase().replace("0X", "0x")].join(",") }, res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(JSON.parse(res.body).wallets, MAX_WALLETS);
+  assert.match(res.headers["cache-control"], /s-maxage=15/);
+});

@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Wallet · Oddly Radar</title>
-<meta name="description" content="Open bets, profit and recent trades for a Polymarket wallet.">
-<meta name="theme-color" content="#0a0d19">
+<meta name="description" content="Rank, profit and every open bet of a Polymarket trader.">
+<meta name="theme-color" content="#0b0d12">
 <meta property="og:title" content="A Polymarket trader on Oddly Radar">
 <meta property="og:description" content="Their rank, profit and every open bet.">
 <meta property="og:image" content="https://oddly-radar.vercel.app/og.png">
@@ -14,13 +14,13 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://oddly-radar.vercel.app/og.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@800&family=Figtree:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700;800&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body data-page="wallet">
 <div class="wrap">
   <header class="top">
-    <a class="logo" href="/"><span class="o">%</span>oddly <small>radar</small></a>
+    <a class="logo" href="/"><span class="o">%</span>oddly<small>radar</small></a>
     <div class="spacer"></div>
     <form class="find" id="find" role="search">
       <input id="findInput" placeholder="Look up a wallet: 0x…" aria-label="Wallet address" autocomplete="off" spellcheck="false">
@@ -28,7 +28,7 @@
     </form>
   </header>
 
-  <section class="whero">
+  <section class="whead">
     <div class="id">
       <span class="avatar" id="profileAvatar" style="background:var(--panel-2)"></span>
       <div style="min-width:0">
@@ -44,10 +44,10 @@
   </section>
 
   <div class="actions">
+    <button class="btn yellow" type="button" id="followBtn" aria-pressed="false">☆ Follow</button>
     <a class="btn light" id="shareX" href="#" target="_blank" rel="noopener">Share on X</a>
     <button class="btn" type="button" id="copyLink">Copy link</button>
-    <a class="btn" id="polyLink" href="#" target="_blank" rel="noopener">Open on Polymarket <span class="arrow">↗</span></a>
-    <a class="btn yellow" data-cfg="telegramUrl" href="#" target="_blank" rel="noopener">Whale alerts</a>
+    <a class="btn" id="polyLink" href="#" target="_blank" rel="noopener">Open on Polymarket ↗</a>
   </div>
   <div class="toast" id="toast" role="status"></div>
 
@@ -55,7 +55,7 @@
 
   <div class="stack">
     <section class="panel">
-      <div class="ph"><h2>Open bets</h2><span class="muted" style="font-size:13px">Largest first · dots show entry and current price</span></div>
+      <div class="ph"><h2>Open bets</h2><span class="sub">Largest first · dots show entry and current price</span></div>
       <div class="tablewrap"><table>
         <thead><tr><th>Market</th><th>Entry → now</th><th class="r">Value</th><th class="r">P&amp;L</th></tr></thead>
         <tbody id="positions"><tr><td colspan="4" class="state">Loading bets…</td></tr></tbody>

@@ -5,6 +5,7 @@ See what the sharpest prediction-market traders are buying, live.
 - **Top traders:** Polymarket leaderboards by profit or volume, for 24h, 7d and 30d.
 - **Wallet pages:** any wallet's open positions, profit and recent trades, with a Share on X button.
 - **Whale feed:** every Polymarket and Kalshi trade over $1k–$100k, merged and refreshed every 10 seconds, with a filter by venue. Kalshi fills from one order are combined so big orders aren't missed.
+- **Following:** star any trader (☆ in the leaderboard, or Follow on their page) and their latest trades appear in a Following panel on the home page, refreshed every 20 seconds. The list is saved in each visitor's browser, so there are no accounts or databases to set up.
 - **Smart money flow:** what the 30 most profitable Polymarket traders this week bought in the last 6 hours, 24 hours or 3 days, ranked by how many of them are buying the same market. Refreshes every 3 minutes.
 - **Live ticker and pulse:** a scrolling ticker of whale trades and a live summary of whale volume and the biggest trade.
 - **Telegram alerts:** a bot posts new whale trades from both venues to your channel every 15 minutes.
@@ -17,7 +18,7 @@ Everything runs on free tiers. The project has **no dependencies**: plain HTML/J
 | Path | What it does |
 | --- | --- |
 | `public/` | The website: `index.html` (home), `wallet.html`, `app.js`, `style.css`, `config.js` (your links) |
-| `api/` | Serverless functions Vercel runs: `leaderboard`, `whales`, `wallet`, `smart`, `gaps` |
+| `api/` | Serverless functions Vercel runs: `leaderboard`, `whales`, `wallet`, `smart`, `following`, `gaps` |
 | `lib/` | Polymarket and Kalshi data clients, shared by the site and the bot. `pairs.js` holds matched markets |
 | `bot/whale-alerts.js` | The Telegram bot |
 | `.github/workflows/whale-alerts.yml` | Runs the bot every 15 minutes on GitHub Actions, free |

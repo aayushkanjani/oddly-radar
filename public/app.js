@@ -25,20 +25,19 @@
     if (s < 86400) return Math.floor(s / 3600) + "h ago";
     return Math.floor(s / 86400) + "d ago";
   }
-  const clock = (ts) => new Date(ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   function hue(addr) {
     let h = 0;
     for (const c of String(addr)) h = (h * 31 + c.charCodeAt(0)) % 360;
     return h;
   }
   const safeImg = (url) => (url && /^https:\/\//.test(url) ? url : "");
-  function avatar(wallet, image, extra = "") {
-    const bg = `hsl(${hue(wallet)} 60% 48%)`;
+  function avatar(wallet, image, attrs = "") {
+    const bg = `hsl(${hue(wallet)} 45% 42%)`;
     const src = safeImg(image);
     const inner = src
       ? `<img src="${esc(src)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">`
       : esc(String(wallet).slice(2, 4).toUpperCase());
-    return `<span class="avatar ${extra}" style="background:${bg}">${inner}</span>`;
+    return `<span class="avatar" ${attrs} style="background:${bg}">${inner}</span>`;
   }
   function micon(t) {
     const src = safeImg(t.icon);
@@ -53,11 +52,11 @@
   const marketUrl = (t) =>
     (t.url && /^https:\/\//.test(t.url) && t.url) ||
     (t.eventSlug ? `https://polymarket.com/event/${encodeURIComponent(t.eventSlug)}` : t.slug ? `https://polymarket.com/market/${encodeURIComponent(t.slug)}` : "https://polymarket.com");
-  const venueBadge = (t) => (t.venue === "Kalshi" ? `<span class="vb ks">Kalshi</span>` : `<span class="vb pm">Polymarket</span>`);
-  const REFRESH_MS = 10000;
+  const venueBadge = (t) => (t.venue === "Kalshi" ? `<span class="vb ks">Kalshi</span>` : `<span class="vb pm">Poly</span>`);
   const tradeKey = (t) => `${t.tx}:${t.wallet}:${t.outcome}:${t.size}`;
   const sideWord = (t) => (t.side === "SELL" ? "SOLD" : "BOUGHT");
   const sideClass = (t) => (t.side === "SELL" ? "sell" : "buy");
+  const REFRESH_MS = 10000;
 
   async function api(path) {
     const res = await fetch(path, { headers: { accept: "application/json" } });
@@ -65,8 +64,41 @@
     if (!res.ok) throw new Error(body.error || `Request failed (${res.status})`);
     return body;
   }
-
   const stateRow = (cols, text, err) => `<tr><td colspan="${cols}" class="state${err ? " err" : ""}">${esc(text)}</td></tr>`;
+
+  // ---------- following (saved in this browser only) ----------
+  const FOLLOW_KEY = "oddly.following.v1";
+  const MAX_FOLLOWS = 20;
+  function getFollows() {
+    try {
+      const v = JSON.parse(localStorage.getItem(FOLLOW_KEY) || "[]");
+      return Array.isArray(v) ? v.filter((f) => f && WALLET_RE.test(f.wallet)).slice(0, MAX_FOLLOWS) : [];
+    } catch {
+      return [];
+    }
+  }
+  function setFollows(list) {
+    try {
+      localStorage.setItem(FOLLOW_KEY, JSON.stringify(list.slice(0, MAX_FOLLOWS)));
+    } catch {
+      /* storage blocked: following works for this visit only */
+    }
+    document.dispatchEvent(new CustomEvent("follows-changed"));
+  }
+  const isFollowing = (w) => getFollows().some((f) => f.wallet === w.toLowerCase());
+  function toggleFollow(wallet, name) {
+    const w = wallet.toLowerCase();
+    const list = getFollows();
+    if (list.some((f) => f.wallet === w)) {
+      setFollows(list.filter((f) => f.wallet !== w));
+      return false;
+    }
+    if (list.length >= MAX_FOLLOWS) return null;
+    setFollows([{ wallet: w, name: name || "" }, ...list]);
+    return true;
+  }
+  const starBtn = (wallet, name) =>
+    `<button type="button" class="star" data-star="${esc(wallet)}" data-name="${esc(name || "")}" aria-pressed="${isFollowing(wallet)}" aria-label="Follow ${esc(displayName(name, wallet))}" title="Follow">${isFollowing(wallet) ? "★" : "☆"}</button>`;
 
   // ---------- shared: header wallet search + config links ----------
   function initShared() {
@@ -93,8 +125,10 @@
   // ---------- home page ----------
   function initHome() {
     const st = { period: "week", sort: "pnl", min: 10000, venue: "all", smartHours: 24 };
-    const seen = new Set();
+    const seenWhales = new Set();
+    const seenFollow = new Set();
     let firstWhaleLoad = true;
+    let firstFollowLoad = true;
     let lastBatch = { trades: [], errors: {} };
 
     function bindSeg(id, key, onChange) {
@@ -108,82 +142,47 @@
       });
     }
 
-    function podiumCard(t, place) {
-      const byProfit = st.sort === "pnl";
-      const main = byProfit ? money(t.pnl, { sign: true }) : money(t.volume);
-      const side = byProfit ? `Volume <span>${money(t.volume)}</span>` : `Profit <span class="${t.pnl >= 0 ? "up" : "dn"}">${money(t.pnl, { sign: true })}</span>`;
-      return `<a class="pcard p${place}" href="${walletUrl(t.wallet)}">
-        <span class="medal">${place}</span>
-        <div class="who">${avatar(t.wallet, t.image, "lg")}<div><b>${esc(displayName(t.name, t.wallet))}${t.verified ? '<span class="tick" title="Verified">✔</span>' : ""}</b><small>${esc(shortAddr(t.wallet))}${t.xUsername ? " · @" + esc(t.xUsername) : ""}</small></div></div>
-        <span class="big" style="${byProfit ? "" : "color:var(--ink)"}">${main}</span>
-        <div class="meta"><span>${side}</span><span>View bets →</span></div>
-      </a>`;
-    }
-
+    // Leaderboard: all traders in one list; the top three get a gold rank.
     async function loadBoard() {
       const tb = $("board");
-      const pod = $("podium");
-      tb.innerHTML = stateRow(4, "Loading traders…");
-      pod.innerHTML = [2, 1, 3].map((p) => `<div class="pcard p${p}"><span class="skel" style="width:60%"></span><span class="skel" style="width:40%;height:26px"></span></div>`).join("");
+      tb.innerHTML = stateRow(5, "Loading traders…");
       const byProfit = st.sort === "pnl";
       $("mainCol").textContent = byProfit ? "Profit" : "Volume";
       $("sideCol").textContent = byProfit ? "Volume" : "Profit";
       try {
         const { traders } = await api(`/api/leaderboard?period=${st.period}&sort=${st.sort}&limit=50`);
         if (!traders.length) {
-          pod.innerHTML = "";
-          tb.innerHTML = stateRow(4, "No traders for this period yet.");
+          tb.innerHTML = stateRow(5, "No traders for this period yet.");
           return;
         }
-        const top = traders.slice(0, 3);
-        // Desktop shows 2 · 1 · 3 so the winner stands in the middle; on phones CSS moves #1 first.
-        const order = [top[1], top[0], top[2]].map((t, i) => (t ? podiumCard(t, [2, 1, 3][i]) : "")).join("");
-        pod.innerHTML = order;
-
-        const rest = traders.slice(3);
-        const VISIBLE = 17; // ranks 4–20 before "Show all"
-        $("board").classList.add("collapsed");
-        $("showAll").hidden = rest.length <= VISIBLE;
+        const VISIBLE = 20;
+        tb.classList.add("collapsed");
+        $("showAll").hidden = traders.length <= VISIBLE;
         $("showAll").textContent = `Show all ${traders.length} traders`;
         const mainVal = (t) => (byProfit ? t.pnl : t.volume);
-        const max = Math.max(1, ...rest.map((t) => Math.abs(mainVal(t))));
-        tb.innerHTML = rest.length
-          ? rest
-              .map((t, i) => {
-                const v = mainVal(t);
-                const pct = Math.max(2, Math.round((Math.abs(v) / max) * 100));
-                const mainTxt = byProfit ? money(v, { sign: true }) : money(v);
-                const sideTxt = byProfit ? money(t.volume) : money(t.pnl, { sign: true });
-                const mainCls = byProfit ? (v >= 0 ? "up" : "dn") : "";
-                const sideCls = byProfit ? "" : t.pnl >= 0 ? "up" : "dn";
-                return `<tr class="link${i >= VISIBLE ? " more" : ""}" data-w="${esc(t.wallet)}" tabindex="0">
-                  <td class="rank">${t.rank}</td>
-                  <td><div class="who">${avatar(t.wallet, t.image)}<div><b>${esc(displayName(t.name, t.wallet))}${t.verified ? '<span class="tick" title="Verified">✔</span>' : ""}</b><small>${esc(shortAddr(t.wallet))}${t.xUsername ? " · @" + esc(t.xUsername) : ""}</small></div></div></td>
-                  <td class="r"><div class="pnlcell"><span class="num ${mainCls}">${mainTxt}</span><span class="bar"><i style="width:${pct}%"></i></span></div></td>
-                  <td class="r num ${sideCls}">${sideTxt}</td></tr>`;
-              })
-              .join("")
-          : stateRow(4, "Only three traders on the board for this period.");
+        const max = Math.max(1, ...traders.map((t) => Math.abs(mainVal(t))));
+        tb.innerHTML = traders
+          .map((t, i) => {
+            const v = mainVal(t);
+            const pct = Math.max(2, Math.round((Math.abs(v) / max) * 100));
+            const mainTxt = byProfit ? money(v, { sign: true }) : money(v);
+            const sideTxt = byProfit ? money(t.volume) : money(t.pnl, { sign: true });
+            const mainCls = byProfit ? (v >= 0 ? "up" : "dn") : "";
+            const sideCls = byProfit ? "" : t.pnl >= 0 ? "up" : "dn";
+            return `<tr class="link${i >= VISIBLE ? " more" : ""}" data-w="${esc(t.wallet)}" tabindex="0">
+              <td>${starBtn(t.wallet, t.name)}</td>
+              <td class="rank${t.rank <= 3 ? " top" : ""}">${t.rank}</td>
+              <td><div class="who">${avatar(t.wallet, t.image)}<div><b>${esc(displayName(t.name, t.wallet))}${t.verified ? '<span class="tick" title="Verified">✔</span>' : ""}</b><small>${esc(shortAddr(t.wallet))}${t.xUsername ? " · @" + esc(t.xUsername) : ""}</small></div></div></td>
+              <td class="r"><div class="pnlcell"><span class="num ${mainCls}">${mainTxt}</span><span class="bar"><i style="width:${pct}%"></i></span></div></td>
+              <td class="r num ${sideCls}">${sideTxt}</td></tr>`;
+          })
+          .join("");
       } catch (err) {
-        pod.innerHTML = "";
-        tb.innerHTML = stateRow(4, err.message, true);
+        tb.innerHTML = stateRow(5, err.message, true);
       }
     }
 
-    async function loadPulseTop() {
-      try {
-        const { traders } = await api("/api/leaderboard?period=week&sort=pnl&limit=1");
-        const t = traders[0];
-        if (!t) throw new Error("none");
-        $("pTop").textContent = money(t.pnl, { sign: true });
-        $("pTopSub").innerHTML = `<a href="${walletUrl(t.wallet)}">${esc(displayName(t.name, t.wallet))}</a> · ${esc(money(t.volume))} traded`;
-      } catch {
-        $("pTop").textContent = "—";
-      }
-    }
-
-    // Polymarket's whale trades usually arrive faster than Kalshi's, so the newest 20 can all be
-    // Polymarket. Alternate venues so both always scroll past.
+    // Live tape: alternate venues so Kalshi shows even when Polymarket is busier.
     function interleaveVenues(trades, max = 24) {
       const pm = trades.filter((t) => t.venue !== "Kalshi");
       const ks = trades.filter((t) => t.venue === "Kalshi");
@@ -194,32 +193,14 @@
       }
       return out;
     }
-
     function renderTicker(trades) {
       if (!trades.length) return;
       const items = interleaveVenues(trades)
         .map(
-          (t) => `<a class="tk" href="${esc(marketUrl(t))}" target="_blank" rel="noopener"><span class="dot"></span>${venueBadge(t)}<b>${money(t.usd)}</b><span class="side ${sideClass(t)}">${sideWord(t)} ${esc(clip(t.outcome || "", 14))}</span><span>${esc(clip(t.title, 46))}</span></a>`,
+          (t) => `<a class="tk" href="${esc(marketUrl(t))}" target="_blank" rel="noopener">${venueBadge(t)}<b>${money(t.usd)}</b><span class="side ${sideClass(t)}">${sideWord(t)} ${esc(clip(t.outcome || "", 14))}</span><span>${esc(clip(t.title, 50))}</span></a>`,
         )
         .join("");
-      // Two copies so the -50% marquee loops without a gap.
-      $("ticker").innerHTML = items + items;
-    }
-
-    function renderPulse(trades) {
-      if (!trades.length) {
-        $("pVol").textContent = "—";
-        $("pBig").textContent = "—";
-        return;
-      }
-      const total = trades.reduce((s, t) => s + t.usd, 0);
-      const oldest = Math.min(...trades.map((t) => t.ts));
-      const big = trades.reduce((a, b) => (b.usd > a.usd ? b : a));
-      const venues = new Set(trades.map((t) => t.venue || "Polymarket"));
-      $("pVol").textContent = money(total);
-      $("pVolSub").textContent = `${trades.length} trades over ${money(st.min)} since ${clock(oldest)} · ${[...venues].join(" + ")}`;
-      $("pBig").textContent = money(big.usd);
-      $("pBigSub").innerHTML = `${sideWord(big).toLowerCase()} ${esc(big.outcome)} on <a href="${esc(marketUrl(big))}" target="_blank" rel="noopener">${esc(clip(big.title, 48))}</a> · ${esc(big.venue || "Polymarket")}`;
+      $("ticker").innerHTML = items + items; // two copies so the -50% loop is seamless
     }
 
     function renderWhales() {
@@ -227,27 +208,24 @@
       const trades = lastBatch.trades.filter((t) => st.venue === "all" || (t.venue || "Polymarket") === st.venue);
       if (!trades.length) {
         const where = st.venue === "all" ? "" : ` on ${st.venue}`;
-        ul.innerHTML = `<li class="state">No trades over ${money(st.min)}${where} in the last hour or so. Try a lower minimum.</li>`;
+        ul.innerHTML = `<li class="state">No trades over ${money(st.min)}${where} in the last hour. Try a lower minimum.</li>`;
         return;
       }
-      const max = Math.max(...trades.map((t) => t.usd));
       ul.innerHTML = trades
         .map((t) => {
           const key = tradeKey(t);
-          const fresh = !firstWhaleLoad && !seen.has(key);
-          seen.add(key);
-          const pct = Math.max(4, Math.round((t.usd / max) * 100));
+          const fresh = !firstWhaleLoad && !seenWhales.has(key);
+          seenWhales.add(key);
           const who =
             t.venue === "Kalshi"
               ? `<span>anonymous${t.fills > 1 ? ` · ${t.fills} fills` : ""}</span>`
               : `<a href="${walletUrl(t.wallet)}">${esc(displayName(t.name, t.wallet))}</a>`;
-          return `<li class="whale${fresh ? " fresh" : ""}">
+          return `<li class="frow${fresh ? " fresh" : ""}">
             ${micon(t)}
             <div style="min-width:0">
               <div class="row1"><span class="amt">${money(t.usd)}</span><span class="pill ${sideClass(t)}">${sideWord(t)} ${esc(t.outcome || "")}</span></div>
-              <a class="q" href="${esc(marketUrl(t))}" target="_blank" rel="noopener">${esc(t.title)}</a>
+              <a class="q" href="${esc(marketUrl(t))}" target="_blank" rel="noopener" title="${esc(t.title)}">${esc(t.title)}</a>
               <div class="meta">${venueBadge(t)}<span>at ${cents(t.price)}</span>${who}<span>${ago(t.ts)}</span></div>
-              <div class="size"><i class="${sideClass(t)}" style="width:${pct}%"></i></div>
             </div>
           </li>`;
         })
@@ -262,23 +240,23 @@
         const data = await api(`/api/whales?min=${st.min}&venue=all&limit=80`);
         lastBatch = { trades: data.trades || [], errors: data.errors || {} };
         renderTicker(lastBatch.trades);
-        renderPulse(lastBatch.trades);
         renderWhales();
         const down = Object.keys(lastBatch.errors);
-        const note = down.length ? ` · ${down.map((v) => v[0].toUpperCase() + v.slice(1)).join(", ")} unavailable right now` : "";
-        $("whalesAt").textContent = "Updated " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) + " · refreshes every 10 seconds" + note;
+        const note = down.length ? ` · ${down.map((v) => v[0].toUpperCase() + v.slice(1)).join(", ")} unavailable` : "";
+        $("whalesAt").textContent = "Updated " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) + " · every 10s" + note;
       } catch (err) {
         ul.innerHTML = `<li class="state err">${esc(err.message)}</li>`;
       }
     }
 
+    // Smart money: markets ranked by how many top traders are buying.
     async function loadSmart() {
       const box = $("smart");
-      box.innerHTML = Array.from({ length: 3 }, () => `<div class="scard"><span class="skel" style="width:80%"></span><span class="skel" style="width:50%;height:20px"></span><span class="skel" style="width:60%"></span></div>`).join("");
+      box.innerHTML = Array.from({ length: 4 }, () => `<div class="srow"><span></span><span class="skel" style="height:30px"></span><span class="skel" style="width:70%"></span><span></span></div>`).join("");
       try {
         const d = await api(`/api/smart?period=week&hours=${st.smartHours}&n=30`);
         const windowWord = { 6: "6 hours", 24: "24 hours", 72: "3 days" }[st.smartHours];
-        $("smartMeta").textContent = `What the ${d.topN} most profitable traders this week bought in the last ${windowWord}` + (d.failed ? ` · ${d.failed} wallets couldn't be read` : "");
+        $("smartMeta").textContent = `What this week's ${d.topN} most profitable traders bought in the last ${windowWord}` + (d.failed ? ` · ${d.failed} wallets unavailable` : "");
         if (!d.markets.length) {
           box.innerHTML = `<div class="state">No buying from the top ${d.topN} traders in the last ${windowWord}. Try a longer window.</div>`;
           return;
@@ -288,23 +266,20 @@
             const avs = m.buyers
               .map((b) => `<a href="${walletUrl(b.wallet)}" title="#${b.rank} ${esc(displayName(b.name, b.wallet))} · ${esc(money(b.net))}">${avatar(b.wallet, b.image)}</a>`)
               .join("");
-            const word = m.buyerCount === 1 ? "top trader buying" : "top traders buying";
-            return `<div class="scard">
-              <div class="top">
-                <span class="num-rank">${i + 1}</span>
-                ${micon(m)}
-                <div style="min-width:0">
-                  <div class="title"><a href="${esc(marketUrl(m))}" target="_blank" rel="noopener">${esc(m.title)}</a></div>
-                  <span class="pill buy" style="margin-top:6px">${esc(m.outcome)}</span>
+            return `<div class="srow">
+              <span class="n">${i + 1}</span>
+              ${micon(m)}
+              <div style="min-width:0">
+                <div class="title"><a href="${esc(marketUrl(m))}" target="_blank" rel="noopener" title="${esc(m.title)}">${esc(m.title)}</a></div>
+                <div class="line2">
+                  <span class="pill buy">${esc(m.outcome)}</span>
+                  <span>Net <b class="up">${money(m.netUsd)}</b></span>
+                  ${m.avgEntry != null ? `<span>Entry <b>${cents(m.avgEntry)}</b></span>` : ""}
+                  <span>Last <b>${cents(m.lastPrice)}</b></span>
+                  <span>${ago(m.lastTs)}</span>
                 </div>
               </div>
-              <div class="consensus"><span class="count"><b>${m.buyerCount}</b>${word}</span><span class="stackav">${avs}</span></div>
-              <div class="figs">
-                <span>Net bought <b class="up">${money(m.netUsd)}</b></span>
-                ${m.avgEntry != null ? `<span>Avg entry <b>${cents(m.avgEntry)}</b></span>` : ""}
-                <span>Last <b>${cents(m.lastPrice)}</b></span>
-                <span>${ago(m.lastTs)}</span>
-              </div>
+              <div class="right"><span class="count"><b>${m.buyerCount}</b>${m.buyerCount === 1 ? "trader" : "traders"}</span><span class="stackav">${avs}</span></div>
             </div>`;
           })
           .join("");
@@ -313,10 +288,51 @@
       }
     }
 
+    // Following: latest trades from the traders this visitor starred.
+    async function loadFollowing() {
+      const ul = $("following");
+      const follows = getFollows();
+      $("followCount").textContent = follows.length ? `${follows.length}` : "";
+      if (!follows.length) {
+        ul.innerHTML = `<li class="empty">Tap <b>☆</b> next to any trader in the leaderboard and their trades show up here as they happen.</li>`;
+        $("followAt").textContent = "";
+        return;
+      }
+      if (!ul.querySelector(".frow")) ul.innerHTML = `<li class="state">Loading trades…</li>`;
+      try {
+        const d = await api(`/api/following?wallets=${follows.map((f) => f.wallet).join(",")}`);
+        const names = new Map(follows.map((f) => [f.wallet, f.name]));
+        if (!d.trades.length) {
+          ul.innerHTML = `<li class="empty">No recent trades from the traders you follow.</li>`;
+          return;
+        }
+        ul.innerHTML = d.trades
+          .map((t) => {
+            const key = tradeKey(t);
+            const fresh = !firstFollowLoad && !seenFollow.has(key);
+            seenFollow.add(key);
+            const name = displayName(t.name || names.get(t.wallet), t.wallet);
+            return `<li class="frow${fresh ? " fresh" : ""}">
+              <a href="${walletUrl(t.wallet)}" style="text-decoration:none">${avatar(t.wallet)}</a>
+              <div style="min-width:0">
+                <div class="row1"><a href="${walletUrl(t.wallet)}" style="text-decoration:none;font-weight:600">${esc(name)}</a><span class="amt" style="font-size:13.5px">${money(t.usd)}</span></div>
+                <a class="q" href="${esc(marketUrl(t))}" target="_blank" rel="noopener" title="${esc(t.title)}">${esc(t.title)}</a>
+                <div class="meta"><span class="pill ${sideClass(t)}">${sideWord(t)} ${esc(t.outcome || "")}</span><span>at ${cents(t.price)}</span><span>${ago(t.ts)}</span></div>
+              </div>
+            </li>`;
+          })
+          .join("");
+        firstFollowLoad = false;
+        $("followAt").textContent = d.failed ? `${d.failed} unavailable` : "";
+      } catch (err) {
+        ul.innerHTML = `<li class="state err">${esc(err.message)}</li>`;
+      }
+    }
+
     async function loadGaps() {
       try {
         const { gaps, pairsConfigured } = await api("/api/gaps");
-        if (!pairsConfigured) return; // section stays hidden until you add pairs in lib/pairs.js
+        if (!pairsConfigured) return; // stays hidden until pairs are added in lib/pairs.js
         $("gapsSection").hidden = false;
         const box = $("gaps");
         if (!gaps.length) {
@@ -328,7 +344,7 @@
             const pts = g.gap * 100;
             return `<div class="gapcard"><div>
               <b>${esc(g.label)}</b> <span class="muted">${esc(g.category)}</span>
-              <div class="muted num" style="font-size:13px;margin-top:2px">
+              <div class="muted num" style="font-size:12.5px;margin-top:2px">
                 <a href="${esc(g.kalshi.url)}" target="_blank" rel="noopener">Kalshi ${cents(g.kalshi.yes)}</a> ·
                 <a href="${esc(g.polymarket.url)}" target="_blank" rel="noopener">Polymarket ${cents(g.polymarket.yes)}</a> ·
                 cheaper on ${esc(g.cheaper)}</div>
@@ -337,7 +353,7 @@
           })
           .join("");
       } catch {
-        /* gaps are optional; leave the section hidden */
+        /* optional section */
       }
     }
 
@@ -345,44 +361,66 @@
     bindSeg("sort", "sort", loadBoard);
     bindSeg("smartHours", "smartHours", loadSmart);
     bindSeg("venue", "venue", () => {
-      firstWhaleLoad = true; // switching views shouldn't flash every card as "new"
+      firstWhaleLoad = true; // switching views shouldn't flash every row as new
       renderWhales();
     });
     $("minUsd").addEventListener("change", (e) => {
       st.min = Number(e.target.value);
       $("whales").innerHTML = "";
       firstWhaleLoad = true;
-      seen.clear();
+      seenWhales.clear();
       loadWhales();
     });
     $("showAll").addEventListener("click", () => {
       const open = $("board").classList.toggle("collapsed") === false;
-      $("showAll").textContent = open ? "Show fewer" : `Show all traders`;
+      $("showAll").textContent = open ? "Show fewer" : "Show all traders";
     });
     $("board").addEventListener("click", (e) => {
+      const star = e.target.closest("[data-star]");
+      if (star) {
+        e.stopPropagation();
+        const on = toggleFollow(star.dataset.star, star.dataset.name);
+        if (on === null) {
+          star.title = `You can follow up to ${MAX_FOLLOWS} traders`;
+          return;
+        }
+        star.setAttribute("aria-pressed", String(on));
+        star.textContent = on ? "★" : "☆";
+        return;
+      }
       const tr = e.target.closest("tr[data-w]");
       if (tr) location.href = walletUrl(tr.dataset.w);
     });
     $("board").addEventListener("keydown", (e) => {
+      if (e.target.closest("[data-star]")) return;
       const tr = e.target.closest("tr[data-w]");
       if (tr && e.key === "Enter") location.href = walletUrl(tr.dataset.w);
     });
+    document.addEventListener("follows-changed", () => {
+      firstFollowLoad = true;
+      seenFollow.clear();
+      loadFollowing();
+    });
 
     loadBoard();
-    loadPulseTop();
     loadWhales();
     loadSmart();
+    loadFollowing();
     loadGaps();
-    // Smart money changes slowly; refresh it every 3 minutes, matching its cache.
-    setInterval(() => {
-      if (!document.hidden) loadSmart();
-    }, 180000);
     setInterval(() => {
       if (!document.hidden) loadWhales();
     }, REFRESH_MS);
-    // Catch up immediately when the visitor comes back to the tab.
+    setInterval(() => {
+      if (!document.hidden) loadFollowing();
+    }, 20000);
+    setInterval(() => {
+      if (!document.hidden) loadSmart();
+    }, 180000);
     document.addEventListener("visibilitychange", () => {
-      if (!document.hidden) loadWhales();
+      if (!document.hidden) {
+        loadWhales();
+        loadFollowing();
+      }
     });
   }
 
@@ -399,7 +437,7 @@
         <span class="dot" style="left:${a}%;background:var(--muted)"></span>
         <span class="dot" style="left:${c}%;background:${color}"></span>
       </div>
-      <span class="num muted" style="font-size:12.5px;white-space:nowrap">${a.toFixed(0)}¢ → <b style="color:${color}">${c.toFixed(0)}¢</b></span>
+      <span class="num muted" style="font-size:12px;white-space:nowrap">${a.toFixed(0)}¢ → <b style="color:${color}">${c.toFixed(0)}¢</b></span>
     </div>`;
   }
 
@@ -410,21 +448,37 @@
       $("profileAddr").textContent = "Paste a full Polymarket wallet address in the search box above.";
       $("positions").innerHTML = stateRow(4, "No wallet to show.");
       $("trades").innerHTML = stateRow(5, "No wallet to show.");
+      $("followBtn").hidden = true;
       return;
     }
     $("profileAddr").textContent = addr;
     $("polyLink").href = `https://polymarket.com/profile/${addr}`;
+
+    let traderName = "";
+    const paintFollow = () => {
+      const on = isFollowing(addr);
+      $("followBtn").textContent = on ? "★ Following" : "☆ Follow";
+      $("followBtn").setAttribute("aria-pressed", String(on));
+    };
+    paintFollow();
+    $("followBtn").addEventListener("click", () => {
+      const on = toggleFollow(addr, traderName);
+      if (on === null) $("toast").textContent = `You can follow up to ${MAX_FOLLOWS} traders. Unfollow one on the home page first.`;
+      else $("toast").textContent = on ? "Following. Their trades now show on the home page." : "Unfollowed.";
+      paintFollow();
+    });
+
     try {
       const d = await api(`/api/wallet?addr=${addr}`);
       const name = displayName(d.name, d.wallet);
+      traderName = d.name || "";
       document.title = `${name} · Oddly Radar`;
       $("profileName").textContent = name;
-      $("profileAvatar").outerHTML = avatar(d.wallet).replace('class="avatar "', 'class="avatar" id="profileAvatar"');
+      $("profileAvatar").outerHTML = avatar(d.wallet, "", 'id="profileAvatar"');
 
       const s = d.stats;
       const st = d.standing;
       const pnlCell = (v) => `<span class="${v >= 0 ? "up" : "dn"}">${money(v, { sign: true })}</span>`;
-
       if (st) {
         $("record").hidden = false;
         $("recRank").textContent = `#${st.rank} ${PERIOD_WORD[st.period]}`;
@@ -432,7 +486,6 @@
         $("recBig").className = "big " + (st.pnl >= 0 ? "up" : "dn");
         $("recSub").textContent = `profit · ${money(st.volume)} traded`;
       }
-
       const cards = [
         ["Open bets", s.openPositions],
         ["Open value", money(s.openValue)],
@@ -446,7 +499,7 @@
         ? d.positions
             .slice(0, 25)
             .map(
-              (p) => `<tr><td class="mkt"><div class="mrow">${micon(p)}<div style="min-width:0"><a href="${marketUrl(p)}" target="_blank" rel="noopener">${esc(p.title)}</a><small>${esc(p.outcome)}${p.endDate ? " · ends " + esc(new Date(p.endDate).toLocaleDateString([], { day: "numeric", month: "short" })) : ""}</small></div></div></td>
+              (p) => `<tr><td class="mkt"><div class="mrow">${micon(p)}<div style="min-width:0"><a href="${esc(marketUrl(p))}" target="_blank" rel="noopener">${esc(p.title)}</a><small>${esc(p.outcome)}${p.endDate ? " · ends " + esc(new Date(p.endDate).toLocaleDateString([], { day: "numeric", month: "short" })) : ""}</small></div></div></td>
               <td>${moveBar(p.avgPrice, p.curPrice)}</td>
               <td class="r num">${money(p.currentValue)}</td>
               <td class="r num ${p.cashPnl >= 0 ? "up" : "dn"}">${money(p.cashPnl, { sign: true })}</td></tr>`,
@@ -458,7 +511,7 @@
         ? d.trades
             .slice(0, 25)
             .map(
-              (t) => `<tr><td class="mkt"><div class="mrow">${micon(t)}<div style="min-width:0"><a href="${marketUrl(t)}" target="_blank" rel="noopener">${esc(t.title)}</a><small>${esc(t.outcome)}</small></div></div></td>
+              (t) => `<tr><td class="mkt"><div class="mrow">${micon(t)}<div style="min-width:0"><a href="${esc(marketUrl(t))}" target="_blank" rel="noopener">${esc(t.title)}</a><small>${esc(t.outcome)}</small></div></div></td>
               <td><span class="pill ${sideClass(t)}">${sideWord(t)}</span></td>
               <td class="r num">${cents(t.price)}</td><td class="r num">${money(t.usd)}</td><td class="r muted">${ago(t.ts)}</td></tr>`,
             )
@@ -470,8 +523,7 @@
       const bet = top ? `"${clip(top.title, 70)}" (${top.outcome}, ${money(top.currentValue)})` : "";
       let text;
       if (st && st.pnl > 0) {
-        text = `${name} is #${st.rank} on Polymarket ${PERIOD_WORD[st.period]}: ${money(st.pnl, { sign: true })} profit.` +
-          (top ? ` Biggest open bet: ${bet}.` : "") + ` See every position${handle}:`;
+        text = `${name} is #${st.rank} on Polymarket ${PERIOD_WORD[st.period]}: ${money(st.pnl, { sign: true })} profit.` + (top ? ` Biggest open bet: ${bet}.` : "") + ` See every position${handle}:`;
       } else if (top) {
         text = `${name} has ${money(s.openValue)} riding on Polymarket. Biggest bet: ${bet}.${handle}`;
       } else {

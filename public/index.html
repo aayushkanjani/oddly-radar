@@ -3,24 +3,24 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Oddly Radar · Smart money in prediction markets</title>
-<meta name="description" content="See what the sharpest Polymarket traders are buying, live. Leaderboards, wallet tracking and whale alerts.">
-<meta name="theme-color" content="#0a0d19">
+<title>Oddly Radar · Follow the smart money in prediction markets</title>
+<meta name="description" content="Live whale trades from Polymarket and Kalshi, and the bets the most profitable traders are making right now.">
+<meta name="theme-color" content="#0b0d12">
 <meta property="og:title" content="Oddly Radar">
-<meta property="og:description" content="See what the sharpest prediction-market traders are buying, live.">
+<meta property="og:description" content="Follow the smart money in prediction markets. Live whale trades from Polymarket and Kalshi.">
 <meta property="og:image" content="https://oddly-radar.vercel.app/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://oddly-radar.vercel.app/og.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@800&family=Figtree:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700;800&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body data-page="home">
-<div class="wrap" style="padding-bottom:14px">
+<div class="wrap" style="padding-bottom:12px">
   <header class="top">
-    <a class="logo" href="/"><span class="o">%</span>oddly <small>radar</small></a>
+    <a class="logo" href="/"><span class="o">%</span>oddly<small>radar</small></a>
     <div class="spacer"></div>
     <form class="find" id="find" role="search">
       <input id="findInput" placeholder="Look up a wallet: 0x…" aria-label="Wallet address" autocomplete="off" spellcheck="false">
@@ -29,93 +29,96 @@
   </header>
 </div>
 
-<div class="ticker" aria-label="Latest whale trades"><div class="track" id="ticker"><span class="tk"><span class="dot"></span>Loading whale trades…</span></div></div>
+<div class="ticker" aria-label="Latest whale trades"><div class="track" id="ticker"><span class="tk">Loading whale trades…</span></div></div>
 
 <div class="wrap">
   <section class="hero">
     <div>
-      <span class="eyebrow"><span class="live" aria-hidden="true"></span>Live · Polymarket + Kalshi</span>
-      <h1>See what the <em>sharpest</em> prediction-market traders are buying.</h1>
-      <p>Follow the wallets that win. Live leaderboards, every whale trade as it happens, and the full position list of any trader.</p>
-      <div class="ctas">
-        <a class="btn yellow" data-cfg="telegramUrl" href="#" target="_blank" rel="noopener">Get whale alerts on Telegram <span class="arrow">→</span></a>
-        <a class="btn" data-cfg="waitlistUrl" href="#" target="_blank" rel="noopener">Join the Pro waitlist</a>
-      </div>
+      <h1>Follow the <span>smart money</span> in prediction markets.</h1>
+      <p>Live whale trades from Polymarket and Kalshi, and the bets the most profitable traders are making right now.</p>
     </div>
-    <aside class="pulse" aria-label="Live pulse">
-      <h2><span class="live" aria-hidden="true"></span>Live pulse</h2>
-      <div class="pstat"><small>Whale volume, latest trades</small><b id="pVol"><span class="skel" style="width:90px"></span></b><div class="sub" id="pVolSub">&nbsp;</div></div>
-      <div class="pstat"><small>Biggest recent trade</small><b id="pBig"><span class="skel" style="width:90px"></span></b><div class="sub" id="pBigSub">&nbsp;</div></div>
-      <div class="pstat"><small>Top trader this week</small><b id="pTop" class="up"><span class="skel" style="width:90px"></span></b><div class="sub" id="pTopSub">&nbsp;</div></div>
-    </aside>
+    <div class="ctas">
+      <a class="btn yellow" data-cfg="telegramUrl" href="#" target="_blank" rel="noopener">Whale alerts on Telegram</a>
+      <a class="btn" data-cfg="waitlistUrl" href="#" target="_blank" rel="noopener">Join Pro waitlist</a>
+    </div>
   </section>
 
-  <div class="section-head">
-    <h2>Top traders</h2>
-    <div class="controls">
-      <div class="seg" id="period" role="group" aria-label="Time period">
-        <button type="button" data-v="day" aria-pressed="false">24h</button>
-        <button type="button" data-v="week" aria-pressed="true">7d</button>
-        <button type="button" data-v="month" aria-pressed="false">30d</button>
+  <div class="layout">
+    <section class="panel area-smart">
+      <div class="ph">
+        <div>
+          <h2><span class="live" aria-hidden="true"></span>Smart money</h2>
+          <div class="sub" id="smartMeta">What the 30 most profitable traders this week are buying</div>
+        </div>
+        <div class="seg" id="smartHours" role="group" aria-label="Time window">
+          <button type="button" data-v="6" aria-pressed="false">6h</button>
+          <button type="button" data-v="24" aria-pressed="true">24h</button>
+          <button type="button" data-v="72" aria-pressed="false">3d</button>
+        </div>
       </div>
-      <div class="seg" id="sort" role="group" aria-label="Rank by">
-        <button type="button" data-v="pnl" aria-pressed="true">Profit</button>
-        <button type="button" data-v="volume" aria-pressed="false">Volume</button>
-      </div>
-    </div>
-  </div>
-  <div class="podium" id="podium"></div>
+      <div id="smart"></div>
+    </section>
 
-  <section class="panel smart">
-    <div class="ph">
-      <div>
-        <h2><span class="live" aria-hidden="true"></span>Smart money flow</h2>
-        <div class="muted" style="font-size:13px;margin-top:2px" id="smartMeta">What the 30 most profitable traders this week are buying together</div>
+    <section class="panel area-board">
+      <div class="ph">
+        <div>
+          <h2>Leaderboard</h2>
+          <div class="sub">Star a trader to follow their trades</div>
+        </div>
+        <div class="controls">
+          <div class="seg" id="period" role="group" aria-label="Time period">
+            <button type="button" data-v="day" aria-pressed="false">24h</button>
+            <button type="button" data-v="week" aria-pressed="true">7d</button>
+            <button type="button" data-v="month" aria-pressed="false">30d</button>
+          </div>
+          <div class="seg" id="sort" role="group" aria-label="Rank by">
+            <button type="button" data-v="pnl" aria-pressed="true">Profit</button>
+            <button type="button" data-v="volume" aria-pressed="false">Volume</button>
+          </div>
+        </div>
       </div>
-      <div class="seg" id="smartHours" role="group" aria-label="Time window">
-        <button type="button" data-v="6" aria-pressed="false">6h</button>
-        <button type="button" data-v="24" aria-pressed="true">24h</button>
-        <button type="button" data-v="72" aria-pressed="false">3d</button>
-      </div>
-    </div>
-    <div class="smartgrid" id="smart"></div>
-  </section>
-
-  <div class="grid">
-    <section class="panel">
-      <div class="ph"><h2>Leaderboard</h2><span class="muted" style="font-size:13px">Tap a trader to see every position</span></div>
       <div class="tablewrap"><table>
-        <thead><tr><th>#</th><th>Trader</th><th class="r" id="mainCol">Profit</th><th class="r" id="sideCol">Volume</th></tr></thead>
+        <thead><tr><th style="width:34px"><span class="sr-only" style="position:absolute;left:-9999px">Follow</span></th><th>#</th><th>Trader</th><th class="r" id="mainCol">Profit</th><th class="r" id="sideCol">Volume</th></tr></thead>
         <tbody id="board" class="collapsed"></tbody>
       </table></div>
       <button class="showall" type="button" id="showAll" hidden>Show all traders</button>
     </section>
 
-    <section class="panel pinned">
-      <div class="ph">
-        <h2><span class="live" aria-hidden="true"></span>Whale trades</h2>
-        <label class="muted" style="font-size:13px">Over
-          <select id="minUsd" aria-label="Minimum trade size">
-            <option value="1000">$1k</option>
-            <option value="5000">$5k</option>
-            <option value="10000" selected>$10k</option>
-            <option value="50000">$50k</option>
-            <option value="100000">$100k</option>
-          </select>
-        </label>
-        <div class="seg" id="venue" role="group" aria-label="Venue" style="width:100%">
-          <button type="button" data-v="all" aria-pressed="true">All</button>
-          <button type="button" data-v="Polymarket" aria-pressed="false">Polymarket</button>
-          <button type="button" data-v="Kalshi" aria-pressed="false">Kalshi</button>
+    <aside class="area-side">
+      <section class="panel">
+        <div class="ph">
+          <h2>Following <span class="muted num" id="followCount" style="font-size:12px"></span></h2>
+          <span class="sub" id="followAt"></span>
         </div>
-      </div>
-      <ul class="feed" id="whales"></ul>
-      <div class="feedfoot" id="whalesAt">Polymarket + Kalshi · refreshes every 10 seconds</div>
-    </section>
+        <ul class="feed short" id="following"></ul>
+      </section>
+
+      <section class="panel">
+        <div class="ph">
+          <h2><span class="live" aria-hidden="true"></span>Whale trades</h2>
+          <label class="muted" style="font-size:12.5px">Over
+            <select id="minUsd" aria-label="Minimum trade size">
+              <option value="1000">$1k</option>
+              <option value="5000">$5k</option>
+              <option value="10000" selected>$10k</option>
+              <option value="50000">$50k</option>
+              <option value="100000">$100k</option>
+            </select>
+          </label>
+          <div class="seg" id="venue" role="group" aria-label="Venue">
+            <button type="button" data-v="all" aria-pressed="true">All</button>
+            <button type="button" data-v="Polymarket" aria-pressed="false">Polymarket</button>
+            <button type="button" data-v="Kalshi" aria-pressed="false">Kalshi</button>
+          </div>
+        </div>
+        <ul class="feed" id="whales"></ul>
+        <div class="feedfoot" id="whalesAt">Polymarket + Kalshi · refreshes every 10s</div>
+      </section>
+    </aside>
   </div>
 
   <section class="panel gaps" id="gapsSection" hidden>
-    <div class="ph"><h2>Price gaps: Kalshi vs Polymarket</h2><span class="muted" style="font-size:13px">YES price, mid of bid and ask</span></div>
+    <div class="ph"><h2>Price gaps · Kalshi vs Polymarket</h2><span class="sub">YES price, mid of bid and ask</span></div>
     <div id="gaps"></div>
   </section>
 
