@@ -44,6 +44,12 @@
     const letter = esc((t.title || "?").trim().charAt(0).toUpperCase());
     return `<span class="micon">${src ? `<img src="${esc(src)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.replaceWith(document.createTextNode('${letter}'))">` : letter}</span>`;
   }
+  function mpic(src, title) {
+    const letter = esc((title || "?").trim().charAt(0).toUpperCase());
+    const url = safeImg(src);
+    return `<span class="mpic">${url ? `<img src="${esc(url)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.replaceWith(document.createTextNode('${letter}'))">` : letter}</span>`;
+  }
+  const gapImage = (g) => g.polymarket?.image || g.kalshi?.image || "";
   const displayName = (name, wallet) => (name && !/^0x[0-9a-f]{20,}/i.test(name) ? name : shortAddr(wallet));
   const PERIOD_WORD = { day: "today", week: "this week", month: "this month" };
   const PERIOD_SHORT = { day: "24h", week: "7d", month: "30d" };
@@ -361,7 +367,12 @@
       ].join("\n");
       return `${CFG.reportUrl}?title=${encodeURIComponent("Wrong pair: " + clip(g.label, 80))}&body=${encodeURIComponent(body)}`;
     }
-    const shareUrl = (g) => `https://twitter.com/intent/tweet?text=${encodeURIComponent(gapShareText(g))}&url=${encodeURIComponent(location.origin + "/#gaps")}`;
+    // Each gap has its own share page (/g/TICKER/slug) whose link preview is that gap's image.
+    const gapKey = (g) => `${g.kalshi.id}|${g.polymarket.id}`;
+    const gapLink = (g) => `${location.origin}/g/${encodeURIComponent(g.kalshi.id)}/${encodeURIComponent(g.polymarket.id)}`;
+    const shareUrl = (g) => `https://twitter.com/intent/tweet?text=${encodeURIComponent(gapShareText(g))}&url=${encodeURIComponent(gapLink(g))}`;
+    // A shared link opens /?gap=TICKER|slug#gaps: scroll to that gap and highlight it once.
+    let sharedGap = new URLSearchParams(location.search).get("gap") || "";
 
     // Very large gaps on auto-matched pairs are more often two different questions than a real gap.
     const SUSPECT_GAP = 0.15;
@@ -376,12 +387,77 @@
       }
       el.hidden = false;
       el.innerHTML = `<span class="lbl">Biggest gap right now</span>
+        ${mpic(gapImage(g), g.label)}
         <span class="q">${esc(g.label)}<small>Kalshi ${cents(g.kalshi.yes)} · Polymarket ${cents(g.polymarket.yes)} · cheaper on ${esc(g.cheaper)}</small></span>
         <span class="big">${(g.gap * 100).toFixed(0)}¢</span>`;
     }
 
+    // ---- gap history (only when storage is set up on the server) ----
+    let history = { enabled: false, series: {} };
+    function sparkline(points) {
+      if (!points || points.length < 2) return "";
+      const W = 92, H = 26;
+      const t0 = points[0].t, t1 = points[points.length - 1].t || t0 + 1;
+      const max = Math.max(1, ...points.map((p) => p.gap));
+      const X = (t) => ((t - t0) / Math.max(1, t1 - t0)) * (W - 4) + 2;
+      const Y = (v) => H - 3 - (v / max) * (H - 6);
+      const line = points.map((p) => `${X(p.t).toFixed(1)},${Y(p.gap).toFixed(1)}`).join(" ");
+      const last = points[points.length - 1];
+      const lo = Math.min(...points.map((p) => p.gap)), hi = Math.max(...points.map((p) => p.gap));
+      return `<svg class="spark" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Gap over 24 hours: low ${lo}¢, high ${hi}¢">
+        <title>Last 24h: low ${lo}¢, high ${hi}¢</title>
+        <polygon points="${X(t0).toFixed(1)},${H - 3} ${line} ${X(last.t).toFixed(1)},${H - 3}" fill="var(--mark-soft)"/>
+        <polyline points="${line}" fill="none" stroke="var(--mark)" stroke-width="1.6" stroke-linejoin="round"/>
+        <circle cx="${X(last.t).toFixed(1)}" cy="${Y(last.gap).toFixed(1)}" r="2.6" fill="var(--mark)"/></svg>`;
+    }
+    async function loadHistory() {
+      if (!allGaps.length) return;
+      try {
+        const keys = allGaps.slice(0, 40).map(gapKey).join(",");
+        const d = await api(`/api/history?pairs=${encodeURIComponent(keys)}`);
+        history = { enabled: !!d.enabled, series: d.series || {} };
+        $("widestBtn").hidden = !history.enabled;
+        if (history.enabled && st.gapMin !== "widest") renderGaps();
+      } catch {
+        /* history is optional */
+      }
+    }
+    async function renderWidest() {
+      const box = $("gaps");
+      box.innerHTML = `<div class="state">Loading the widest gaps of the week…</div>`;
+      try {
+        const d = await api("/api/history?widest=7");
+        if (!d.enabled || !d.items?.length) {
+          box.innerHTML = `<div class="state">No history yet. It fills in as gaps are recorded every 10 minutes.</div>`;
+          return;
+        }
+        const live = new Map(allGaps.map((g) => [gapKey(g), g]));
+        box.innerHTML = d.items
+          .map((it, i) => {
+            const now = live.get(it.id);
+            const when = new Date(it.day + "T12:00:00Z").toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" });
+            return `<div class="gcard wide">
+              ${mpic(it.image, it.label)}
+              <div style="min-width:0">
+                <div class="q">${esc(it.label || it.id)}</div>
+                <div class="meta">${it.verified ? `<span class="badge ok">Verified pair</span>` : `<span class="badge auto">Auto-matched</span>`}<span>widest on ${esc(when)}</span>${now ? `<span>now <b>${(now.gap * 100).toFixed(1)}¢</b></span>` : `<span>closed or no longer matched</span>`}</div>
+              </div>
+              <div class="prices">
+                ${it.kalshiUrl ? `<a class="vp" href="${esc(it.kalshiUrl)}" target="_blank" rel="noopener"><small>Kalshi</small><b>↗</b></a>` : ""}
+                ${it.polymarketUrl ? `<a class="vp" href="${esc(it.polymarketUrl)}" target="_blank" rel="noopener"><small>Polymarket</small><b>↗</b></a>` : ""}
+              </div>
+              <div class="gapbox"><b class="hot">${Number(it.maxGap).toFixed(1)}¢</b><small>#${i + 1} this week</small></div>
+            </div>`;
+          })
+          .join("");
+      } catch (err) {
+        box.innerHTML = `<div class="state err">${esc(err.message)}</div>`;
+      }
+    }
+
     function renderGaps() {
       const box = $("gaps");
+      if (st.gapMin === "widest") return renderWidest();
       const min = Number(st.gapMin) / 100;
       const list = allGaps.filter((g) => g.gap >= min);
       if (!list.length) {
@@ -393,11 +469,16 @@
           const pts = g.gap * 100;
           const kCheap = g.cheaper === "Kalshi";
           const edge = g.lockIn ? g.lockIn.edge * 100 : null;
-          const badge = g.verified ? `<span class="badge ok">Verified pair</span>` : `<span class="badge auto">Auto-matched · ${Math.round((g.match || 0) * 100)}%</span>`;
+          const badge = g.verified
+            ? `<span class="badge ok">Verified pair</span>`
+            : g.kind === "game"
+              ? `<span class="badge game">${esc((g.league || "").toUpperCase())} game · same teams and date</span>`
+              : `<span class="badge auto">Auto-matched · ${Math.round((g.match || 0) * 100)}%</span>`;
           // Same deadline: one date. Different deadlines (normal for long-dated questions): show both.
           const kd = closeDate(g.kalshi.endDate), pd = closeDate(g.polymarket.endDate);
           const dateLine = (g.closeDaysApart || 0) > 30 && kd && pd ? `closes Kalshi ${kd} · Polymarket ${pd}` : kd || pd ? `closes ${kd || pd}` : "";
-          return `<div class="gcard">
+          return `<div class="gcard${gapKey(g) === sharedGap ? " shared" : ""}" data-key="${esc(gapKey(g))}">
+            ${mpic(gapImage(g), g.label)}
             <div style="min-width:0">
               <div class="q">${esc(g.label)}</div>
               <div class="meta">${badge}${dateLine ? `<span>${esc(dateLine)}</span>` : ""}${g.category ? `<span>${esc(g.category)}</span>` : ""}</div>
@@ -406,7 +487,7 @@
               <a class="vp${kCheap ? " cheap" : ""}" href="${esc(g.kalshi.url)}" target="_blank" rel="noopener" title="${esc(g.kalshi.question)}"><small>Kalshi${kCheap ? " · cheaper" : ""}</small><b>${ctsf(g.kalshi.yes)}</b></a>
               <a class="vp${kCheap ? "" : " cheap"}" href="${esc(g.polymarket.url)}" target="_blank" rel="noopener" title="${esc(g.polymarket.question)}"><small>Polymarket${kCheap ? "" : " · cheaper"}</small><b>${ctsf(g.polymarket.yes)}</b></a>
             </div>
-            <div class="gapbox"><b class="${pts >= 3 ? "hot" : ""}">${pts.toFixed(pts < 10 ? 1 : 0)}¢</b><small>gap</small></div>
+            <div class="gapbox"><b class="${pts >= 3 ? "hot" : ""}">${pts.toFixed(pts < 10 ? 1 : 0)}¢</b><small>gap</small>${history.enabled ? sparkline(history.series[gapKey(g)]) : ""}</div>
             <div class="foot">
               ${edge != null ? `<span>YES on ${esc(g.cheaper)} + NO on the other: ${edge > 0 ? `locks <b class="up">${edge.toFixed(1)}¢</b> per $1` : `<b>no lock-in</b> after the spread`}</span>` : ""}
               ${g.ruleNote ? `<span class="warn">⚠ ${esc(g.ruleNote)}</span>` : ""}
@@ -427,15 +508,26 @@
 
     async function loadGaps() {
       const box = $("gaps");
-      if (!allGaps.length) box.innerHTML = Array.from({ length: 3 }, () => `<div class="gcard"><span class="skel" style="width:70%"></span><span class="skel" style="width:180px;height:40px"></span><span class="skel" style="width:60px;height:28px"></span></div>`).join("");
+      if (!allGaps.length) box.innerHTML = Array.from({ length: 3 }, () => `<div class="gcard"><span class="mpic"></span><span class="skel" style="width:70%"></span><span class="skel" style="width:180px;height:40px"></span><span class="skel" style="width:60px;height:28px"></span></div>`).join("");
       try {
         const d = await api("/api/gaps");
         allGaps = d.gaps || [];
+        loadHistory();
         const sc = d.scanned || {};
-        const scanned = sc.kalshi && sc.polymarket ? ` · scanned ${sc.kalshi.toLocaleString()} Kalshi and ${sc.polymarket.toLocaleString()} Polymarket markets` : "";
-        $("gapsMeta").textContent = `${allGaps.length} questions priced on both venues${scanned}`;
+        // Kalshi lists every outcome and price level as its own market (each candidate, each BTC strike),
+        // so its raw count is always far higher. Say so instead of showing two numbers that look broken.
+        $("gapsMeta").textContent = `${allGaps.length} ${allGaps.length === 1 ? "question" : "questions"} live on both venues`;
+        $("gapsMeta").title =
+          sc.kalshi && sc.polymarket
+            ? `Checked ${sc.kalshi.toLocaleString()} Kalshi and ${sc.polymarket.toLocaleString()} Polymarket markets. Kalshi lists each outcome and price level as its own market, so its count is much higher.`
+            : "";
         renderGapBanner();
         renderGaps();
+        if (sharedGap) {
+          const el = document.querySelector(".gcard.shared");
+          if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
+          sharedGap = ""; // highlight only on the first load
+        }
       } catch (err) {
         box.innerHTML = `<div class="state err">${esc(err.message)}</div>`;
       }

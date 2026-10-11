@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Oddly Radar · Same bet, two prices</title>
+<title>Oddly Radar · Same bet. Two prices.</title>
 <meta name="description" content="Live price gaps between Kalshi and Polymarket, every whale trade on both, and what the most profitable traders are buying.">
 <meta name="theme-color" content="#0b0d12">
 <meta property="og:title" content="Oddly Radar">
@@ -34,11 +34,11 @@
 <div class="wrap">
   <section class="hero">
     <div>
-      <h1>Same bet. <span>Two prices.</span> We find the gap.</h1>
+      <h1>Same bet. <span>Two prices.</span></h1>
       <p>Live price gaps between Kalshi and Polymarket, every whale trade on both, and what the most profitable traders are buying.</p>
     </div>
     <div class="ctas">
-      <a class="btn yellow" data-cfg="telegramUrl" href="#" target="_blank" rel="noopener">Whale alerts on Telegram</a>
+      <a class="btn accent" data-cfg="telegramUrl" href="#" target="_blank" rel="noopener">Whale alerts on Telegram</a>
       <a class="btn" data-cfg="waitlistUrl" href="#" target="_blank" rel="noopener">Join Pro waitlist</a>
     </div>
   </section>
@@ -55,6 +55,7 @@
         <button type="button" data-v="0" aria-pressed="true">All</button>
         <button type="button" data-v="3" aria-pressed="false">3¢+</button>
         <button type="button" data-v="5" aria-pressed="false">5¢+</button>
+        <button type="button" data-v="widest" aria-pressed="false" id="widestBtn" hidden>Widest 7d</button>
       </div>
     </div>
     <div id="gaps"></div>
@@ -81,7 +82,7 @@
       <div class="ph">
         <div>
           <h2>Leaderboard</h2>
-          <div class="sub">Star a trader to follow their trades</div>
+          <div class="sub">Polymarket traders · star one to follow their trades. Kalshi doesn't publish who trades, so its traders can't be ranked or followed.</div>
         </div>
         <div class="controls">
           <div class="seg" id="period" role="group" aria-label="Time period">

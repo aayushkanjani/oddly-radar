@@ -2,6 +2,9 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "outputDirectory": "public",
   "cleanUrls": true,
+  "rewrites": [
+    { "source": "/g/:k/:p", "destination": "/api/share?k=:k&p=:p" }
+  ],
   "functions": {
     "api/smart.js": { "maxDuration": 30 },
     "api/gaps.js": { "maxDuration": 30 }

@@ -1,4 +1,4 @@
-// Posts new large Polymarket trades to a Telegram channel.
+// Posts new whale trades (Polymarket + Kalshi) and new price gaps to a Telegram channel.
 // Runs on a schedule (see .github/workflows/whale-alerts.yml), or by hand: `npm run bot`.
 //
 // Environment:
@@ -7,6 +7,8 @@
 //   MIN_USD             smallest trade to alert on (default 10000)
 //   SITE_URL            your deployed site, e.g. https://oddlyradar.vercel.app (optional)
 //   STATE_FILE          where seen trades are remembered (default .state/seen.json)
+//   MIN_GAP_CENTS       smallest price gap to alert on, in cents (default 3). Gap alerts need SITE_URL.
+//   GAP_STATE_FILE      where alerted gaps are remembered (default .state/gaps.json)
 
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
@@ -121,9 +123,122 @@ export async function run(env = process.env, { fetchTrades = fetchAllWhales, sen
   return { posted, firstRun: false };
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  run().catch((err) => {
-    console.error(err.message || err);
-    process.exit(1);
+// ---------- price-gap alerts ----------
+// Only confident pairs: hand-verified, or an automatic match of 70%+ that isn't suspiciously wide.
+const GAP_MAX_PER_RUN = 3;
+const REALERT_WIDEN = 0.02; // post the same gap again only if it widened by 2¢…
+const REALERT_AFTER_MS = 6 * 3600e3; // …and at least 6 hours have passed
+const gapKey = (g) => `${g.kalshi?.id}|${g.polymarket?.id}`;
+export const isConfident = (g) => g.verified || ((g.match || 0) >= 0.7 && g.gap <= 0.15);
+
+export function selectGapAlerts(gaps, state, { minGap = 0.03, now = Date.now() } = {}) {
+  const seen = state.alerted || {};
+  return gaps
+    .filter((g) => isConfident(g) && g.gap >= minGap)
+    .filter((g) => {
+      const prev = seen[gapKey(g)];
+      return !prev || (g.gap >= prev.gap + REALERT_WIDEN && now - prev.at >= REALERT_AFTER_MS);
+    })
+    .sort((a, b) => b.gap - a.gap)
+    .slice(0, GAP_MAX_PER_RUN);
+}
+
+export function nextGapState(posted, state, { now = Date.now() } = {}) {
+  const alerted = { ...(state.alerted || {}) };
+  for (const g of posted) alerted[gapKey(g)] = { gap: g.gap, at: now };
+  // Forget gaps not alerted for 14 days so the file stays small.
+  for (const [k, v] of Object.entries(alerted)) if (now - v.at > 14 * 86400e3) delete alerted[k];
+  return { alerted };
+}
+
+const cents = (p) => {
+  const v = Number(p) * 100;
+  return (v < 10 ? v.toFixed(1) : v.toFixed(0)) + "¢";
+};
+
+export function formatGapCaption(g, siteUrl = "") {
+  const kCheap = g.cheaper === "Kalshi";
+  const link = siteUrl ? `${siteUrl.replace(/\/$/, "")}/g/${encodeURIComponent(g.kalshi.id)}/${encodeURIComponent(g.polymarket.id)}` : "";
+  const lines = [
+    `⚖️ <b>${cents(g.gap)} gap</b> · same bet, two prices`,
+    `${escHtml(g.label)}`,
+    ``,
+    `Kalshi <b>${cents(g.kalshi.yes)}</b>${kCheap ? " ← cheaper" : ""}`,
+    `Polymarket <b>${cents(g.polymarket.yes)}</b>${kCheap ? "" : " ← cheaper"}`,
+  ];
+  if (g.ruleNote) lines.push(``, `⚠️ ${escHtml(g.ruleNote)}`);
+  if (!g.verified) lines.push(``, `<i>Auto-matched (${Math.round((g.match || 0) * 100)}%). Read both rules before trading.</i>`);
+  if (link) lines.push(``, `<a href="${link}">See the gap on Oddly Radar</a>`);
+  return lines.join("\n");
+}
+
+async function sendTelegramPhoto(token, chatId, photoUrl, caption) {
+  const res = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, photo: photoUrl, caption, parse_mode: "HTML" }),
   });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Telegram answered ${res.status}: ${body.slice(0, 200)}`);
+  }
+}
+
+async function fetchGaps(siteUrl) {
+  const res = await fetch(`${siteUrl.replace(/\/$/, "")}/api/gaps`, { headers: { accept: "application/json" } });
+  if (!res.ok) throw new Error(`Site answered ${res.status} for /api/gaps`);
+  const body = await res.json();
+  return body.gaps || [];
+}
+
+export async function runGaps(
+  env = process.env,
+  { getGaps = fetchGaps, sendPhoto = sendTelegramPhoto, send = sendTelegram, log = console.log, now = Date.now() } = {},
+) {
+  if (!env.SITE_URL) {
+    log("Gap alerts skipped: set the SITE_URL variable to your site's address to turn them on.");
+    return { posted: 0, skipped: true };
+  }
+  const minGap = (Number(env.MIN_GAP_CENTS) || 3) / 100;
+  const stateFile = env.GAP_STATE_FILE || ".state/gaps.json";
+  const dryRun = !env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID;
+  const gaps = await getGaps(env.SITE_URL);
+  const prev = await loadState(stateFile);
+
+  if (!prev) {
+    // First run: remember today's confident gaps instead of posting them all at once.
+    const current = gaps.filter((g) => isConfident(g) && g.gap >= minGap);
+    await saveState(stateFile, nextGapState(current, {}, { now }));
+    log(`First run: recorded ${current.length} current gap(s). Gap alerts start next run.`);
+    return { posted: 0, firstRun: true };
+  }
+
+  const picks = selectGapAlerts(gaps, prev, { minGap, now });
+  const posted = [];
+  for (const g of picks) {
+    const caption = formatGapCaption(g, env.SITE_URL);
+    const photo = `${env.SITE_URL.replace(/\/$/, "")}/api/gapimage?k=${encodeURIComponent(g.kalshi.id)}&p=${encodeURIComponent(g.polymarket.id)}`;
+    if (dryRun) log("[dry run]\n" + caption + "\n" + photo + "\n");
+    else {
+      try {
+        await sendPhoto(env.TELEGRAM_BOT_TOKEN, env.TELEGRAM_CHAT_ID, photo, caption);
+      } catch (err) {
+        log(`Photo failed (${err.message}); sending as text.`);
+        await send(env.TELEGRAM_BOT_TOKEN, env.TELEGRAM_CHAT_ID, caption);
+      }
+      await sleep(1100);
+    }
+    posted.push(g);
+  }
+  await saveState(stateFile, nextGapState(posted, prev, { now }));
+  log(`${dryRun ? "Dry run: would have posted" : "Posted"} ${posted.length} gap alert(s) of ${Math.round(minGap * 100)}¢+.`);
+  return { posted: posted.length, firstRun: false };
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  // Whale alerts and gap alerts run independently: one failing doesn't stop the other.
+  const results = await Promise.allSettled([run(), runGaps()]);
+  const failed = results.filter((r) => r.status === "rejected");
+  for (const f of failed) console.error(f.reason?.message || f.reason);
+  if (failed.length === results.length) process.exit(1);
 }

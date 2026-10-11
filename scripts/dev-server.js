@@ -35,6 +35,14 @@ function resolveStatic(urlPath) {
 const server = http.createServer(async (req, res) => {
   const { pathname } = new URL(req.url, `http://localhost:${PORT}`);
   try {
+    // Same rewrite as vercel.json: /g/TICKER/slug → /api/share?k=TICKER&p=slug
+    const share = pathname.match(/^\/g\/([^/]+)\/([^/]+)$/);
+    if (share) {
+      req.url = `/api/share?k=${encodeURIComponent(decodeURIComponent(share[1]))}&p=${encodeURIComponent(decodeURIComponent(share[2]))}`;
+      const mod = await import(pathToFileURL(path.join(apiDir, "share.js")).href);
+      await mod.default(req, res);
+      return;
+    }
     const apiMatch = pathname.match(/^\/api\/([a-z0-9-]+)$/);
     if (apiMatch) {
       const file = path.join(apiDir, apiMatch[1] + ".js");

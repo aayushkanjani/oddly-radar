@@ -8,7 +8,10 @@ See what the sharpest prediction-market traders are buying, live.
 - **Following:** star any trader (☆ in the leaderboard, or Follow on their page) and their latest trades appear in a Following panel on the home page, refreshed every 20 seconds. The list is saved in each visitor's browser, so there are no accounts or databases to set up.
 - **Smart money flow:** what the 30 most profitable Polymarket traders this week bought in the last 6 hours, 24 hours or 3 days, ranked by how many of them are buying the same market. Refreshes every 3 minutes.
 - **Live ticker and pulse:** a scrolling ticker of whale trades and a live summary of whale volume and the biggest trade.
-- **Telegram alerts:** a bot posts new whale trades from both venues to your channel every 15 minutes.
+- **Telegram alerts:** every 15 minutes the bot posts new whale trades from both venues, plus new price gaps of 3¢ or more as a picture with both prices.
+- **Share images:** every gap has its own link (`/g/KALSHI_TICKER/polymarket-slug`) whose preview on X, WhatsApp and Telegram is a picture of that gap with live prices.
+- **Gap history (optional):** a 24-hour sparkline on each gap and a "Widest 7d" tab. Needs a free database; see "Turn on gap history" below.
+- **Sports gaps:** NFL, MLB, NHL, NBA, WNBA and college football games, matched by league, date and both teams.
 - **Price gaps:** the same question priced differently on Kalshi and Polymarket, found automatically. Each gap shows both prices, the cheaper venue, the locked-in edge before fees, both rule texts side by side, and a Share button. The biggest gap gets a banner at the top of the page.
 
 Everything runs on free tiers. The project has **no dependencies**: plain HTML/JS pages, small serverless functions, and a Node script. You need Node 20 or newer only to run it on your own computer.
@@ -65,6 +68,20 @@ The **first run only records existing trades** so your channel isn't flooded. Al
 
 Good to know: GitHub can start scheduled runs a few minutes late, and it pauses schedules in repos with no activity for 60 days. Any commit restarts them.
 
+## Turn on gap history (free, about 5 minutes)
+
+Gap history needs somewhere to keep a snapshot every 10 minutes. An Upstash Redis database on the free plan is plenty.
+
+1. In Vercel, open your project → **Storage** → **Create Database** (or **Browse Marketplace**) → choose **Upstash for Redis** on the free plan, and connect it to this project. Vercel adds the database's address and key to your project automatically.
+2. Redeploy once (Deployments → ⋯ → Redeploy) so the site picks them up.
+3. Open your site: after the first snapshot, each gap shows a small 24-hour line, and a **Widest 7d** tab appears next to All / 3¢+ / 5¢+. The line gets longer as snapshots build up over the day.
+
+If you create the database on upstash.com instead, add its REST URL and token to Vercel → Settings → Environment Variables as `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`. Without a database, everything else works as before.
+
+## Gap alert settings
+
+Gap alerts use the same bot and the `SITE_URL` variable you already set. Optional: add a repository variable `MIN_GAP_CENTS` (default `3`) to change the smallest gap that gets posted. Only confident pairs are posted (hand-verified, sports games, or automatic matches of 70% or more), each gap once, and again only if it widens by 2¢ after at least 6 hours. The first run after this update records the current gaps without posting them.
+
 ## Run it on your computer
 
 ```bash
@@ -83,6 +100,8 @@ npm run bot     # dry run: prints alerts instead of posting (no token needed)
 - Each market is used once; the best-scoring pair wins.
 
 Results are cached for 10 minutes, and each pair shows its match score. Open `/api/gaps?debug=1` on your site to see near-misses: questions that almost matched, with their scores. That's the quickest way to tune `MATCH_THRESHOLD` in `lib/match.js` if pairs are missing or wrong.
+
+Each gap card shows the Polymarket market's own picture (from its public data; Kalshi's data has no pictures). Pictures load straight from Polymarket, so if one is missing or removed the card shows the question's first letter instead.
 
 To pin a pair you've checked by hand, add it to `lib/pairs.js` (steps at the top of that file). Hand-checked pairs show as **Verified** and always appear.
 
@@ -109,3 +128,7 @@ If a venue changes its API, the parsing lives in `lib/polymarket.js` and `lib/ka
 2. Auto-post the biggest whale trade of the day to X.
 3. Wallet accuracy scores from resolved markets.
 4. Share images for wallet pages, so links unfurl with a picture on X.
+
+## Credits
+
+Share images use glyphs from the Inter typeface by Rasmus Andersson, under the SIL Open Font License 1.1 (rsms.me/inter).

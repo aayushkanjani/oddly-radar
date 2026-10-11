@@ -78,7 +78,7 @@ test("normalizeMarket parses Gamma's JSON-string prices and uses the bid/ask mid
 test("normalizeKalshiMarket reads dollar-string prices", () => {
   const k = normalizeKalshiMarket({ ticker: "T", title: "Q?", yes_bid_dollars: "0.4200", yes_ask_dollars: "0.4400", last_price_dollars: "0.4300", rules_primary: "R1", event_ticker: "EV" });
   assert.equal(k.yes.toFixed(2), "0.43");
-  assert.equal(k.url, "https://kalshi.com/markets/ev");  // event "EV" has no dash, so its series is "ev"
+  assert.equal(k.url, "https://kalshi.com/markets/ev");  // event "EV" is its own series, so the series page
   const empty = normalizeKalshiMarket({ ticker: "T", yes_bid_dollars: "0.0000", yes_ask_dollars: "0.0000", last_price_dollars: "0.2500" });
   assert.equal(empty.yes, 0.25);
 });
@@ -522,9 +522,10 @@ test("the same race on both venues still pairs", () => {
   assert.equal(matchMarkets(kalshi, poly, { now: NOW }).pairs.length, 1);
 });
 
-test("Kalshi links use the series code, which Kalshi's site accepts", () => {
-  assert.equal(kalshiUrl("SENATECA-28"), "https://kalshi.com/markets/senateca");
-  assert.equal(kalshiUrl("KXFEDDECISION-27DEC", "KXFEDDECISION"), "https://kalshi.com/markets/kxfeddecision");
+test("Kalshi links point at the exact event: series / readable title / event", () => {
+  assert.equal(kalshiUrl("SENATECA-28", "", "California Senate winner? (2028)"), "https://kalshi.com/markets/senateca/california-senate-winner-2028/senateca-28");
+  assert.equal(kalshiUrl("KXPRESNOMD-28", "KXPRESNOMD", "2028 Democratic presidential nominee"), "https://kalshi.com/markets/kxpresnomd/2028-democratic-presidential-nominee/kxpresnomd-28");
+  assert.equal(kalshiUrl("KXA-1", "KXA", ""), "https://kalshi.com/markets/kxa/market/kxa-1");
   assert.equal(kalshiUrl(""), "https://kalshi.com/markets");
 });
 
@@ -561,7 +562,7 @@ test("Kalshi candidates from events and the flat market list are merged without 
   const parlay = { ...m, ticker: "KXMVE-1", mve_collection_ticker: "KXMVE" };
   const out = kalshiCandidates([{ event_ticker: "KXA-1", series_ticker: "KXA", markets: [m] }], [m, parlay]);
   assert.equal(out.length, 1);
-  assert.equal(out[0].url, "https://kalshi.com/markets/kxa");
+  assert.equal(out[0].url, "https://kalshi.com/markets/kxa/q/kxa-1");
 });
 
 // ---- v6.3: stat words, presidency synonym, blocked pairs (from the live Lamine Yamal pair) ----
@@ -595,4 +596,245 @@ test("a blocked pair is skipped and the market can pair with a better partner", 
   const after = matchMarkets([k], [p1, p2], { now: NOW, blocked }).pairs;
   assert.equal(after.length, 1);
   assert.equal(after[0].polymarket.id, "bayern-champion");
+});
+
+// ---- v7: market pictures ----
+test("normalizeMarket keeps the market's picture, and only https links", () => {
+  const withImage = normalizeMarket({ slug: "s", question: "Q?", outcomes: '["Yes","No"]', outcomePrices: '["0.4","0.6"]', image: "https://polymarket-upload.s3.amazonaws.com/a.png" });
+  assert.equal(withImage.image, "https://polymarket-upload.s3.amazonaws.com/a.png");
+  const iconOnly = normalizeMarket({ slug: "s", question: "Q?", outcomes: '["Yes","No"]', outcomePrices: '["0.4","0.6"]', icon: "https://x.test/i.png" });
+  assert.equal(iconOnly.image, "https://x.test/i.png");
+  const unsafe = normalizeMarket({ slug: "s", question: "Q?", outcomes: '["Yes","No"]', outcomePrices: '["0.4","0.6"]', image: "javascript:alert(1)" });
+  assert.equal(unsafe.image, "");
+});
+
+// ---- v8: shareable gap images ----
+import { renderGapImage, wrap, simplify, measure } from "../lib/ogimage.js";
+import { loadPair } from "../api/gapimage.js";
+import { sharePage } from "../api/share.js";
+
+test("renderGapImage returns a valid 1200×630 PNG quickly", () => {
+  const t0 = Date.now();
+  const png = renderGapImage({ question: "Will the Fed cut rates by 25 bps in December?", kalshiYes: 0.41, polyYes: 0.48 });
+  assert.ok(Date.now() - t0 < 2000);
+  assert.deepEqual([...png.subarray(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  assert.equal(png.readUInt32BE(16), 1200);
+  assert.equal(png.readUInt32BE(20), 630);
+});
+
+test("text helpers wrap long questions with an ellipsis and simplify unknown characters", () => {
+  const lines = wrap("word ".repeat(80), "title", 600, 3);
+  assert.equal(lines.length, 3);
+  assert.ok(lines[2].endsWith("…"));
+  assert.ok(lines.every((l) => measure(l, "title") <= 600));
+  assert.equal(simplify("Ocasio–Cortez’s “café” 日本", "title"), "Ocasio–Cortez’s “café” ??");
+  assert.equal(simplify("ø7", "big"), "7"); // the price face has no "?", so unknown characters are dropped
+});
+
+test("loadPair rejects malformed ids before calling the venues", async () => {
+  let calls = 0;
+  const spy = async () => (calls++, { yes: 0.4, question: "Q" });
+  assert.equal(await loadPair("KX<script>", "slug", { kalshi: spy, poly: spy }), null);
+  assert.equal(await loadPair("KXA-1", "Bad Slug!", { kalshi: spy, poly: spy }), null);
+  assert.equal(calls, 0);
+  const ok = await loadPair("kxa-1", "good-slug", { kalshi: async (t) => ({ yes: 0.4, question: "K " + t }), poly: async () => ({ yes: 0.5, question: "P?" }) });
+  assert.equal(ok.question, "P?");
+});
+
+test("sharePage escapes question text and points the preview at the gap image", () => {
+  const html = sharePage({
+    origin: "https://radar.example",
+    k: "KXA-1",
+    p: "good-slug",
+    pair: { question: 'Evil "</title><script>alert(1)</script>', kalshi: { yes: 0.4 }, polymarket: { yes: 0.5 } },
+  });
+  assert.ok(!html.includes("<script>alert(1)"));
+  assert.ok(html.includes("&lt;/title&gt;&lt;script&gt;"));
+  assert.ok(html.includes('content="https://radar.example/api/gapimage?k=KXA-1&amp;p=good-slug"'));
+  assert.ok(html.includes("summary_large_image"));
+  assert.ok(html.includes('location.replace("/?gap=KXA-1%7Cgood-slug#gaps")'));
+});
+
+// ---- v8: Telegram gap alerts ----
+import { selectGapAlerts, nextGapState, formatGapCaption, runGaps, isConfident } from "../bot/whale-alerts.js";
+
+const G = (k, p, gap, o = {}) => ({ label: `Q ${k}?`, kalshi: { id: k, yes: 0.4 }, polymarket: { id: p, yes: 0.4 + gap }, gap, cheaper: "Kalshi", match: 0.8, verified: false, ruleNote: "", ...o });
+
+test("gap alerts pick confident 3¢+ gaps, widest first, at most 3", () => {
+  const gaps = [G("K1", "p1", 0.05), G("K2", "p2", 0.02), G("K3", "p3", 0.09, { match: 0.6 }), G("K4", "p4", 0.2), G("K5", "p5", 0.04, { verified: true, match: 1 }), G("K6", "p6", 0.06), G("K7", "p7", 0.035)];
+  const picked = selectGapAlerts(gaps, {}, { minGap: 0.03 });
+  assert.deepEqual(picked.map((g) => g.kalshi.id), ["K6", "K1", "K5"]);
+  assert.ok(!isConfident(gaps[2]) && !isConfident(gaps[3]), "low match and suspiciously wide gaps are skipped");
+});
+
+test("a gap is posted again only after widening by 2¢ and 6 hours", () => {
+  const t0 = Date.parse("2026-10-12T00:00:00Z");
+  const state = nextGapState([G("K1", "p1", 0.05)], {}, { now: t0 });
+  assert.equal(selectGapAlerts([G("K1", "p1", 0.06)], state, { now: t0 + 7 * 3600e3 }).length, 0, "widened only 1¢");
+  assert.equal(selectGapAlerts([G("K1", "p1", 0.08)], state, { now: t0 + 2 * 3600e3 }).length, 0, "too soon");
+  assert.equal(selectGapAlerts([G("K1", "p1", 0.08)], state, { now: t0 + 7 * 3600e3 }).length, 1);
+  const later = nextGapState([], state, { now: t0 + 15 * 86400e3 });
+  assert.deepEqual(later.alerted, {}, "old entries are forgotten");
+});
+
+test("formatGapCaption escapes text and links the share page", () => {
+  const text = formatGapCaption(G("KX-1", "my-slug", 0.07, { label: "Fed <cut> & hike?" }), "https://radar.example/");
+  assert.ok(text.includes("Fed &lt;cut&gt; &amp; hike?"));
+  assert.ok(text.includes('href="https://radar.example/g/KX-1/my-slug"'));
+  assert.ok(text.includes("Auto-matched (80%)"));
+  assert.ok(text.startsWith("⚖️ <b>7.0¢ gap</b>"));
+});
+
+test("runGaps: first run records, next run posts a photo, falls back to text if the photo fails", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "gaps-"));
+  const env = { SITE_URL: "https://radar.example", GAP_STATE_FILE: path.join(dir, "g.json"), TELEGRAM_BOT_TOKEN: "t", TELEGRAM_CHAT_ID: "@c" };
+  const photos = [], texts = [];
+  const log = () => {};
+  const r1 = await runGaps(env, { getGaps: async () => [G("K1", "p1", 0.05)], sendPhoto: async (...a) => photos.push(a), send: async (...a) => texts.push(a), log });
+  assert.equal(r1.firstRun, true);
+  assert.equal(photos.length, 0);
+
+  const r2 = await runGaps(env, {
+    getGaps: async () => [G("K1", "p1", 0.05), G("K9", "p9", 0.06)],
+    sendPhoto: async () => { throw new Error("bad photo"); },
+    send: async (...a) => texts.push(a),
+    log,
+  });
+  assert.equal(r2.posted, 1, "K1 was already recorded, so only K9 posts");
+  assert.equal(texts.length, 1);
+  assert.ok(texts[0][2].includes("Q K9?"));
+
+  const noSite = await runGaps({}, { log });
+  assert.equal(noSite.skipped, true);
+});
+
+// ---- v9: gap history ----
+import { recordSnapshot, readSeries, readWidest, parsePoints, BUCKET_MS } from "../lib/history.js";
+import { storeConfig } from "../lib/store.js";
+
+// A tiny in-memory stand-in for the Redis commands history uses.
+function fakeRedis() {
+  const kv = new Map(), lists = new Map(), zsets = new Map();
+  const pipeline = async (cmds) =>
+    cmds.map(([cmd, key, ...a]) => {
+      switch (cmd) {
+        case "SET": {
+          if (a.includes("NX") && kv.has(key)) return null;
+          kv.set(key, a[0]);
+          return "OK";
+        }
+        case "GET": return kv.get(key) ?? null;
+        case "LPUSH": { const l = lists.get(key) || []; l.unshift(a[0]); lists.set(key, l); return l.length; }
+        case "LTRIM": { const l = lists.get(key) || []; lists.set(key, l.slice(+a[0], +a[1] + 1)); return "OK"; }
+        case "LRANGE": return (lists.get(key) || []).slice(+a[0], +a[1] + 1);
+        case "EXPIRE": return 1;
+        case "ZADD": {
+          const [gt, score, member] = a;
+          const z = zsets.get(key) || new Map();
+          if (!(gt === "GT" && z.has(member) && z.get(member) >= +score)) z.set(member, +score);
+          zsets.set(key, z);
+          return 1;
+        }
+        case "ZREVRANGE": {
+          const z = [...(zsets.get(key) || new Map())].sort((x, y) => y[1] - x[1]).slice(+a[0], +a[1] + 1);
+          return z.flatMap(([m, sc]) => [m, String(sc)]);
+        }
+        default: throw new Error("unexpected " + cmd);
+      }
+    });
+  return { pipeline };
+}
+const HG = (k, gap, o = {}) => ({ label: `Q ${k}`, kalshi: { id: k, yes: 0.4, url: "https://kalshi.com/markets/x" }, polymarket: { id: `p-${k.toLowerCase()}`, yes: 0.4 + gap, url: "https://polymarket.com/market/x", image: "https://i.test/a.png" }, gap, verified: false, match: 0.8, ...o });
+
+test("history records one snapshot per 10 minutes and reads it back oldest first", async () => {
+  const { pipeline } = fakeRedis();
+  const t0 = Date.parse("2026-10-12T00:00:00Z");
+  assert.equal((await recordSnapshot([HG("K1", 0.05)], { now: t0, pipeline })).recorded, 1);
+  assert.equal((await recordSnapshot([HG("K1", 0.09)], { now: t0 + 60e3, pipeline })).skipped, true, "same bucket");
+  await recordSnapshot([HG("K1", 0.07)], { now: t0 + BUCKET_MS, pipeline });
+  const series = await readSeries(["K1|p-k1"], { pipeline });
+  assert.deepEqual(series["K1|p-k1"].map((p) => p.gap), [5, 7]);
+  assert.equal(series["K1|p-k1"][0].k, 40);
+});
+
+test("widest-this-week keeps each pair's maximum across days, with its label and links", async () => {
+  const { pipeline } = fakeRedis();
+  const d0 = Date.parse("2026-10-10T12:00:00Z");
+  await recordSnapshot([HG("K1", 0.04), HG("K2", 0.06)], { now: d0, pipeline });
+  await recordSnapshot([HG("K1", 0.11), HG("K2", 0.03)], { now: d0 + 86400e3, pipeline });
+  await recordSnapshot([HG("K1", 0.05)], { now: d0 + 2 * 86400e3, pipeline });
+  const top = await readWidest({ now: d0 + 2 * 86400e3, pipeline });
+  assert.deepEqual(top.map((t) => [t.id, t.maxGap, t.day]), [["K1|p-k1", 11, "2026-10-11"], ["K2|p-k2", 6, "2026-10-10"]]);
+  assert.equal(top[0].label, "Q K1");
+  assert.equal(top[0].image, "https://i.test/a.png");
+});
+
+test("history is off without storage settings, and accepts either naming", () => {
+  assert.equal(storeConfig({}), null);
+  assert.equal(storeConfig({ KV_REST_API_URL: "http://plain", KV_REST_API_TOKEN: "t" }), null, "https only");
+  assert.deepEqual(storeConfig({ KV_REST_API_URL: "https://x.upstash.io/", KV_REST_API_TOKEN: "t" }), { url: "https://x.upstash.io", token: "t" });
+  assert.deepEqual(storeConfig({ UPSTASH_REDIS_REST_URL: "https://y.upstash.io", UPSTASH_REDIS_REST_TOKEN: "u" }), { url: "https://y.upstash.io", token: "u" });
+  assert.deepEqual(parsePoints(["bad", "100,5,40,45"]), [{ t: 100, gap: 5, k: 40, p: 45 }]);
+});
+
+// ---- v10: sports games (fixtures follow live shapes seen on 2026-10-12) ----
+import { parseKalshiGameEvent, parsePolyGameSlug, kalshiGames, polyGames, matchGames, canonTeam } from "../lib/sports.js";
+
+const kGame = (event, code, title, bid, ask, o = {}) => ({ ticker: `${event}-${code}`, event_ticker: event, title, yes_sub_title: title.replace(/ wins$/, ""), yes_bid_dollars: bid, yes_ask_dollars: ask, close_time: "2026-10-19T22:00:00Z", status: "active", rules_primary: `If ${title.replace(/ wins$/, "")} wins, Yes.`, ...o });
+const pGame = (slug, question, outcomes, bid, ask, o = {}) => ({ slug, question, outcomes: JSON.stringify(outcomes), outcomePrices: JSON.stringify([String(bid), String(1 - bid)]), bestBid: bid, bestAsk: ask, sportsMarketType: "moneyline", endDate: "2026-10-16T22:00:00Z", description: "Moneyline rules.", image: "https://i.test/g.png", ...o });
+
+test("Kalshi game codes and Polymarket game slugs parse", () => {
+  assert.deepEqual(parseKalshiGameEvent("KXMLBGAME-26OCT161800TBCLE"), { series: "KXMLBGAME", date: "2026-10-16", time: "1800", codes: "TBCLE" });
+  assert.deepEqual(parseKalshiGameEvent("KXNHLGAME-26OCT13BOSSJ"), { series: "KXNHLGAME", date: "2026-10-13", time: "", codes: "BOSSJ" });
+  assert.equal(parseKalshiGameEvent("KXPRESNOMD-28"), null);
+  assert.deepEqual(parsePolyGameSlug("mlb-sd-mil-2026-10-03"), { league: "mlb", teams: ["sd", "mil"], date: "2026-10-03" });
+  assert.equal(canonTeam("nhl", "LAK"), canonTeam("nhl", "la"));
+});
+
+test("games match on league, date and both teams, whatever the order, and price the same team", () => {
+  const kalshi = [
+    kGame("KXMLBGAME-26OCT161800TBCLE", "TB", "Tampa Bay wins", "0.49", "0.56"),
+    kGame("KXMLBGAME-26OCT161800TBCLE", "CLE", "Cleveland wins", "0.43", "0.50"),
+    kGame("KXMLBGAME-26OCT151800TBCLE", "TB", "Tampa Bay wins", "0.44", "0.48"),
+    kGame("KXMLBGAME-26OCT151800TBCLE", "CLE", "Cleveland wins", "0.50", "0.56"),
+    kGame("KXNHLGAME-26OCT13BOSSJ", "SJ", "San Jose wins", "0.43", "0.47"),
+    kGame("KXNHLGAME-26OCT13BOSSJ", "BOS", "Boston wins", "0.51", "0.55"),
+  ];
+  const poly = [
+    pGame("mlb-cle-tb-2026-10-16", "Guardians vs. Rays", ["Cleveland Guardians", "Tampa Bay Rays"], 0.40, 0.42),
+    pGame("nhl-bos-sjs-2026-10-13", "Bruins vs. Sharks", ["Boston Bruins", "San Jose Sharks"], 0.57, 0.58),
+    pGame("nfl-buf-mia-2026-10-18", "Bills vs. Dolphins", ["Bills", "Dolphins"], 0.6, 0.61),
+    pGame("mlb-cle-tb-2026-10-16-x", "Not a plain game slug", ["A", "B"], 0.5, 0.5),
+    pGame("mlb-cle-tb-2026-10-17", "Yes/No row", ["Yes", "No"], 0.5, 0.5),
+  ];
+  const gaps = matchGames(kalshiGames(kalshi), polyGames(poly));
+  assert.equal(gaps.length, 2, "Oct 16 TB–CLE and Oct 13 BOS–SJ; nothing for the unmatched NFL game or odd rows");
+  const mlb = gaps.find((g) => g.league === "mlb");
+  assert.equal(mlb.kalshi.id, "KXMLBGAME-26OCT161800TBCLE-CLE", "priced on Polymarket's first team (Cleveland), on the Oct 16 game");
+  assert.equal(mlb.kalshi.yes.toFixed(3), "0.465");
+  assert.equal(mlb.polymarket.yes.toFixed(2), "0.41");
+  assert.match(mlb.label, /Cleveland Guardians to win/);
+  assert.equal(mlb.kalshi.url, "https://kalshi.com/markets/kxmlbgame/cleveland-game/kxmlbgame-26oct161800tbcle");
+  const nhl = gaps.find((g) => g.league === "nhl");
+  assert.equal(nhl.kalshi.id, "KXNHLGAME-26OCT13BOSSJ-BOS", "sjs and SJ are the same team");
+});
+
+test("ambiguous games are skipped, and a one-day date difference only matches when unique", () => {
+  const kalshi = [
+    kGame("KXMLBGAME-26OCT161300TBCLE", "TB", "Tampa Bay wins", "0.49", "0.56"),
+    kGame("KXMLBGAME-26OCT161300TBCLE", "CLE", "Cleveland wins", "0.43", "0.50"),
+    kGame("KXMLBGAME-26OCT161900TBCLE", "TB", "Tampa Bay wins", "0.49", "0.56"),
+    kGame("KXMLBGAME-26OCT161900TBCLE", "CLE", "Cleveland wins", "0.43", "0.50"),
+    kGame("KXNFLGAME-26OCT19PHICHI", "PHI", "Philadelphia wins", "0.65", "0.66"),
+    kGame("KXNFLGAME-26OCT19PHICHI", "CHI", "Chicago wins", "0.34", "0.35"),
+  ];
+  const poly = [
+    pGame("mlb-cle-tb-2026-10-16", "Guardians vs. Rays", ["Cleveland Guardians", "Tampa Bay Rays"], 0.40, 0.42),
+    pGame("nfl-phi-chi-2026-10-18", "Eagles vs. Bears", ["Eagles", "Bears"], 0.6, 0.61),
+  ];
+  const gaps = matchGames(kalshiGames(kalshi), polyGames(poly));
+  assert.ok(!gaps.some((g) => g.league === "mlb"), "doubleheader: two Kalshi games on the same date, so skip");
+  const nfl = gaps.find((g) => g.league === "nfl");
+  assert.ok(nfl, "late game dated a day apart still matches when it's the only one");
+  assert.match(nfl.tieNote, /tie/);
 });

@@ -28,12 +28,13 @@ jobs:
           key: seen-${{ github.run_id }}
           restore-keys: seen-
 
-      - name: Post new whale trades
+      - name: Post new whale trades and price gaps
         run: node bot/whale-alerts.js
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           MIN_USD: ${{ vars.MIN_USD || '10000' }}
+          MIN_GAP_CENTS: ${{ vars.MIN_GAP_CENTS || '3' }}
           SITE_URL: ${{ vars.SITE_URL }}
 
       - name: Save seen trades
