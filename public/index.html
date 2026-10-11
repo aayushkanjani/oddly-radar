@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Oddly Radar · Follow the smart money in prediction markets</title>
-<meta name="description" content="Live whale trades from Polymarket and Kalshi, and the bets the most profitable traders are making right now.">
+<title>Oddly Radar · Same bet, two prices</title>
+<meta name="description" content="Live price gaps between Kalshi and Polymarket, every whale trade on both, and what the most profitable traders are buying.">
 <meta name="theme-color" content="#0b0d12">
 <meta property="og:title" content="Oddly Radar">
 <meta property="og:description" content="Follow the smart money in prediction markets. Live whale trades from Polymarket and Kalshi.">
@@ -14,7 +14,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://oddly-radar.vercel.app/og.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body data-page="home">
@@ -34,13 +34,31 @@
 <div class="wrap">
   <section class="hero">
     <div>
-      <h1>Follow the <span>smart money</span> in prediction markets.</h1>
-      <p>Live whale trades from Polymarket and Kalshi, and the bets the most profitable traders are making right now.</p>
+      <h1>Same bet. <span>Two prices.</span> We find the gap.</h1>
+      <p>Live price gaps between Kalshi and Polymarket, every whale trade on both, and what the most profitable traders are buying.</p>
     </div>
     <div class="ctas">
       <a class="btn yellow" data-cfg="telegramUrl" href="#" target="_blank" rel="noopener">Whale alerts on Telegram</a>
       <a class="btn" data-cfg="waitlistUrl" href="#" target="_blank" rel="noopener">Join Pro waitlist</a>
     </div>
+  </section>
+
+  <a class="gapbanner" id="gapBanner" href="#gaps" hidden></a>
+
+  <section class="panel gaps" id="gapsSection">
+    <div class="ph">
+      <div>
+        <h2><span class="live" aria-hidden="true"></span>Price gaps</h2>
+        <div class="sub" id="gapsMeta">Matching questions across Kalshi and Polymarket…</div>
+      </div>
+      <div class="seg" id="gapMin" role="group" aria-label="Minimum gap">
+        <button type="button" data-v="0" aria-pressed="true">All</button>
+        <button type="button" data-v="3" aria-pressed="false">3¢+</button>
+        <button type="button" data-v="5" aria-pressed="false">5¢+</button>
+      </div>
+    </div>
+    <div id="gaps"></div>
+    <div class="feedfoot">Prices are the mid of bid and ask. "Lock-in" is before fees and assumes both venues resolve the same way: always read both rules.</div>
   </section>
 
   <div class="layout">
@@ -117,10 +135,6 @@
     </aside>
   </div>
 
-  <section class="panel gaps" id="gapsSection" hidden>
-    <div class="ph"><h2>Price gaps · Kalshi vs Polymarket</h2><span class="sub">YES price, mid of bid and ask</span></div>
-    <div id="gaps"></div>
-  </section>
 
   <footer>Data from Polymarket and Kalshi public APIs. Oddly Radar is independent and not affiliated with either venue. Nothing here is financial advice.</footer>
 </div>

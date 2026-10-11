@@ -124,7 +124,7 @@
 
   // ---------- home page ----------
   function initHome() {
-    const st = { period: "week", sort: "pnl", min: 10000, venue: "all", smartHours: 24 };
+    const st = { period: "week", sort: "pnl", min: 10000, venue: "all", smartHours: 24, gapMin: 0 };
     const seenWhales = new Set();
     const seenFollow = new Set();
     let firstWhaleLoad = true;
@@ -329,37 +329,95 @@
       }
     }
 
+    // Price gaps: the same question priced differently on Kalshi and Polymarket.
+    let allGaps = [];
+    const ctsf = (p) => (Number(p) * 100).toFixed(Number(p) * 100 < 10 ? 1 : 0) + "¢";
+    const closeDate = (iso) => {
+      const t = Date.parse(iso);
+      if (!Number.isFinite(t) || t - Date.now() > 3 * 365 * 86400e3) return "";
+      return "closes " + new Date(t).toLocaleDateString([], { day: "numeric", month: "short" });
+    };
+    function gapShareText(g) {
+      const handle = CFG.xHandle ? ` via @${CFG.xHandle}` : "";
+      return `Same bet, two prices: "${clip(g.label, 80)}" is ${cents(g.kalshi.yes)} on Kalshi and ${cents(g.polymarket.yes)} on Polymarket. That's a ${(g.gap * 100).toFixed(0)}¢ gap${handle}`;
+    }
+    const shareUrl = (g) => `https://twitter.com/intent/tweet?text=${encodeURIComponent(gapShareText(g))}&url=${encodeURIComponent(location.origin + "/#gaps")}`;
+
+    function renderGapBanner() {
+      const g = allGaps[0];
+      const el = $("gapBanner");
+      if (!g || g.gap < 0.02) {
+        el.hidden = true;
+        return;
+      }
+      el.hidden = false;
+      el.innerHTML = `<span class="lbl">Biggest gap right now</span>
+        <span class="q">${esc(g.label)}<small>Kalshi ${cents(g.kalshi.yes)} · Polymarket ${cents(g.polymarket.yes)} · cheaper on ${esc(g.cheaper)}</small></span>
+        <span class="big">${(g.gap * 100).toFixed(0)}¢</span>`;
+    }
+
+    function renderGaps() {
+      const box = $("gaps");
+      const min = Number(st.gapMin) / 100;
+      const list = allGaps.filter((g) => g.gap >= min);
+      if (!list.length) {
+        box.innerHTML = `<div class="state">${allGaps.length ? `No gaps of ${st.gapMin}¢ or more right now. Try "All".` : "No matching questions found on both venues right now. Checking again shortly."}</div>`;
+        return;
+      }
+      box.innerHTML = list
+        .map((g) => {
+          const pts = g.gap * 100;
+          const kCheap = g.cheaper === "Kalshi";
+          const edge = g.lockIn ? g.lockIn.edge * 100 : null;
+          const badge = g.verified ? `<span class="badge ok">Verified pair</span>` : `<span class="badge auto">Auto-matched · ${Math.round((g.match || 0) * 100)}%</span>`;
+          const dates = [closeDate(g.kalshi.endDate), closeDate(g.polymarket.endDate)].filter(Boolean);
+          return `<div class="gcard">
+            <div style="min-width:0">
+              <div class="q">${esc(g.label)}</div>
+              <div class="meta">${badge}${dates[0] ? `<span>${esc(dates[0])}</span>` : ""}${g.category ? `<span>${esc(g.category)}</span>` : ""}</div>
+            </div>
+            <div class="prices">
+              <a class="vp${kCheap ? " cheap" : ""}" href="${esc(g.kalshi.url)}" target="_blank" rel="noopener" title="${esc(g.kalshi.question)}"><small>Kalshi${kCheap ? " · cheaper" : ""}</small><b>${ctsf(g.kalshi.yes)}</b></a>
+              <a class="vp${kCheap ? "" : " cheap"}" href="${esc(g.polymarket.url)}" target="_blank" rel="noopener" title="${esc(g.polymarket.question)}"><small>Polymarket${kCheap ? "" : " · cheaper"}</small><b>${ctsf(g.polymarket.yes)}</b></a>
+            </div>
+            <div class="gapbox"><b class="${pts >= 3 ? "hot" : ""}">${pts.toFixed(pts < 10 ? 1 : 0)}¢</b><small>gap</small></div>
+            <div class="foot">
+              ${edge != null ? `<span>YES on ${esc(g.cheaper)} + NO on the other: ${edge > 0 ? `locks <b class="up">${edge.toFixed(1)}¢</b> per $1` : `<b>no lock-in</b> after the spread`}</span>` : ""}
+              ${g.ruleNote ? `<span class="warn">⚠ ${esc(g.ruleNote)}</span>` : ""}
+              <span class="act"><a class="btn" href="${shareUrl(g)}" target="_blank" rel="noopener">Share</a></span>
+            </div>
+            <details>
+              <summary>Compare the rules ▾</summary>
+              <div class="rules">
+                <div><b>Kalshi · ${esc(clip(g.kalshi.question, 70))}</b>${esc(clip(g.kalshi.rules || "No rules text available.", 900))}</div>
+                <div><b>Polymarket · ${esc(clip(g.polymarket.question, 70))}</b>${esc(clip(g.polymarket.rules || "No rules text available.", 900))}</div>
+              </div>
+            </details>
+          </div>`;
+        })
+        .join("");
+    }
+
     async function loadGaps() {
+      const box = $("gaps");
+      if (!allGaps.length) box.innerHTML = Array.from({ length: 3 }, () => `<div class="gcard"><span class="skel" style="width:70%"></span><span class="skel" style="width:180px;height:40px"></span><span class="skel" style="width:60px;height:28px"></span></div>`).join("");
       try {
-        const { gaps, pairsConfigured } = await api("/api/gaps");
-        if (!pairsConfigured) return; // stays hidden until pairs are added in lib/pairs.js
-        $("gapsSection").hidden = false;
-        const box = $("gaps");
-        if (!gaps.length) {
-          box.innerHTML = `<div class="state">Couldn't load the matched markets right now.</div>`;
-          return;
-        }
-        box.innerHTML = gaps
-          .map((g) => {
-            const pts = g.gap * 100;
-            return `<div class="gapcard"><div>
-              <b>${esc(g.label)}</b> <span class="muted">${esc(g.category)}</span>
-              <div class="muted num" style="font-size:12.5px;margin-top:2px">
-                <a href="${esc(g.kalshi.url)}" target="_blank" rel="noopener">Kalshi ${cents(g.kalshi.yes)}</a> ·
-                <a href="${esc(g.polymarket.url)}" target="_blank" rel="noopener">Polymarket ${cents(g.polymarket.yes)}</a> ·
-                cheaper on ${esc(g.cheaper)}</div>
-              ${g.ruleNote ? `<div class="warn">⚠ Rules differ: ${esc(g.ruleNote)}</div>` : ""}
-            </div><span class="gapnum ${pts >= 3 ? "hot" : ""}">${pts.toFixed(1)}¢</span></div>`;
-          })
-          .join("");
-      } catch {
-        /* optional section */
+        const d = await api("/api/gaps");
+        allGaps = d.gaps || [];
+        const sc = d.scanned || {};
+        const scanned = sc.kalshi && sc.polymarket ? ` · scanned ${sc.kalshi.toLocaleString()} Kalshi and ${sc.polymarket.toLocaleString()} Polymarket markets` : "";
+        $("gapsMeta").textContent = `${allGaps.length} questions priced on both venues${scanned}`;
+        renderGapBanner();
+        renderGaps();
+      } catch (err) {
+        box.innerHTML = `<div class="state err">${esc(err.message)}</div>`;
       }
     }
 
     bindSeg("period", "period", loadBoard);
     bindSeg("sort", "sort", loadBoard);
     bindSeg("smartHours", "smartHours", loadSmart);
+    bindSeg("gapMin", "gapMin", renderGaps);
     bindSeg("venue", "venue", () => {
       firstWhaleLoad = true; // switching views shouldn't flash every row as new
       renderWhales();
@@ -416,6 +474,10 @@
     setInterval(() => {
       if (!document.hidden) loadSmart();
     }, 180000);
+    // Gaps are cached for 2 minutes on the server; refresh on the same rhythm.
+    setInterval(() => {
+      if (!document.hidden) loadGaps();
+    }, 120000);
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden) {
         loadWhales();

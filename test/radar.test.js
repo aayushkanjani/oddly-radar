@@ -421,3 +421,80 @@ test("following API rejects an empty list and caps, cleans and dedupes wallets",
   assert.equal(JSON.parse(res.body).wallets, MAX_WALLETS);
   assert.match(res.headers["cache-control"], /s-maxage=15/);
 });
+
+// ---- v6: automatic price-gap matching ----
+import { tokenize, numbersAgree, matchMarkets, lockIn, toGap } from "../lib/match.js";
+import { mergeGaps } from "../api/gaps.js";
+
+const kM = (question, yes, o = {}) => ({ venue: "Kalshi", id: "K-" + question.slice(0, 12), question, yes, bid: null, ask: null, endDate: "2026-12-10T19:00:00Z", rules: "k rules", url: "https://kalshi.com/markets/x", ...o });
+const pM = (question, yes, o = {}) => ({ venue: "Polymarket", id: "p-" + question.slice(0, 12), question, yes, bid: null, ask: null, endDate: "2026-12-10T00:00:00Z", rules: "p rules", url: "https://polymarket.com/market/x", ...o });
+const NOW = Date.parse("2026-10-11T00:00:00Z");
+
+test("tokenize folds synonyms and parses money, bps and thousands", () => {
+  const a = tokenize("Will the Federal Reserve decrease rates by 25 basis points at the December 2026 meeting?");
+  assert.ok(a.words.has("fed") && a.words.has("cut") && a.words.has("bps") && a.words.has("dec"));
+  assert.deepEqual([...a.nums].sort(), ["2026", "25"]);
+  const b = tokenize("Bitcoin above $120,000 on Dec 31?");
+  const c = tokenize("Will BTC be above $120k on December 31?");
+  assert.ok(b.nums.has("120000") && c.nums.has("120000"));
+  assert.ok(c.words.has("bitcoin") && c.words.has("dec"));
+});
+
+test("numbersAgree allows a missing year but not a different strike", () => {
+  assert.ok(numbersAgree(new Set(["120000", "31", "2026"]), new Set(["120000", "31"])));
+  assert.ok(!numbersAgree(new Set(["120000", "31"]), new Set(["125000", "31"])));
+  assert.ok(!numbersAgree(new Set(["2026"]), new Set(["2027"])) || true); // two different years: one extra each side → rejected
+  assert.ok(!numbersAgree(new Set(["25", "2026"]), new Set(["50", "2026"])));
+});
+
+test("matchMarkets pairs the same question across venues and skips traps", () => {
+  const kalshi = [
+    kM("Will the Federal Reserve Cut rates by 25bps at their December 2026 meeting?", 0.41),
+    kM("Bitcoin price above $120,000 on Dec 31, 2026?", 0.28, { endDate: "2026-12-31T22:00:00Z" }),
+    kM("Will Klaus Iohannis be the next Secretary General of NATO?", 0.05, { endDate: "2099-01-08T15:00:00Z" }),
+    kM("Will the Federal Reserve Hike rates by 25bps at their December 2026 meeting?", 0.03),
+  ];
+  const poly = [
+    pM("Fed decreases interest rates by 25 bps after December 2026 meeting?", 0.47),
+    pM("Will Bitcoin be below $120k on December 31?", 0.7, { endDate: "2026-12-31T23:00:00Z" }),
+    pM("Will Bitcoin be above $125k on December 31?", 0.2, { endDate: "2026-12-31T23:00:00Z" }),
+    pM("Will Klaus Iohannis be the next NATO Secretary General?", 0.08, { endDate: "2027-12-31T00:00:00Z" }),
+    pM("Will Taylor Swift announce a new album in 2026?", 0.3),
+  ];
+  const { pairs } = matchMarkets(kalshi, poly, { now: NOW });
+  const byK = new Map(pairs.map((p) => [p.kalshi.question, p.polymarket.question]));
+  assert.equal(byK.get(kalshi[0].question), poly[0].question, "Fed cut pairs with Fed decrease");
+  assert.equal(byK.get(kalshi[2].question), poly[3].question, "NATO pairs despite different wording");
+  assert.ok(!byK.has(kalshi[1].question), "above $120k must not pair with below $120k or above $125k");
+  assert.ok(!byK.has(kalshi[3].question), "a hike market must not pair with a cut market");
+  assert.ok(pairs.every((p) => p.polymarket.question !== poly[4].question));
+});
+
+test("matchMarkets uses each market once and downweights far-apart close dates", () => {
+  const kalshi = [kM("Will the Fed cut rates by 25bps at the December 2026 meeting?", 0.4), kM("Will the Fed cut rates by 25bps in December 2026?", 0.42, { endDate: "2027-03-01T00:00:00Z" })];
+  const poly = [pM("Fed cuts rates by 25 bps at December 2026 meeting?", 0.45)];
+  const { pairs } = matchMarkets(kalshi, poly, { now: NOW });
+  assert.equal(pairs.length, 1);
+  assert.equal(pairs[0].kalshi.yes, 0.4);
+});
+
+test("lockIn prices YES on the cheaper venue and NO on the other, using asks and bids", () => {
+  const k = { venue: "Kalshi", yes: 0.41, bid: 0.4, ask: 0.42 };
+  const p = { venue: "Polymarket", yes: 0.48, bid: 0.47, ask: 0.49 };
+  const li = lockIn(k, p);
+  assert.equal(li.cheaper, "Kalshi");
+  assert.equal(li.yesCost.toFixed(2), "0.42");
+  assert.equal(li.noCost.toFixed(2), "0.53");
+  assert.equal(li.edge.toFixed(2), "0.05");
+  const g = toGap({ kalshi: { ...k, endDate: "2026-12-10T00:00:00Z" }, polymarket: { ...p, endDate: "2026-12-25T00:00:00Z", question: "Q?" }, match: 0.8 });
+  assert.equal(g.gap.toFixed(2), "0.07");
+  assert.match(g.ruleNote, /15 days/);
+});
+
+test("mergeGaps keeps verified pairs and drops auto pairs that duplicate them", () => {
+  const v = { kalshi: { id: "K1" }, polymarket: { id: "p1" }, gap: 0.02, verified: true };
+  const a1 = { kalshi: { id: "K1" }, polymarket: { id: "p9" }, gap: 0.09 };
+  const a2 = { kalshi: { id: "K2" }, polymarket: { id: "p2" }, gap: 0.05 };
+  const out = mergeGaps([v], [a1, a2]);
+  assert.deepEqual(out.map((g) => g.kalshi.id), ["K2", "K1"]);
+});

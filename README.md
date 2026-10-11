@@ -9,7 +9,7 @@ See what the sharpest prediction-market traders are buying, live.
 - **Smart money flow:** what the 30 most profitable Polymarket traders this week bought in the last 6 hours, 24 hours or 3 days, ranked by how many of them are buying the same market. Refreshes every 3 minutes.
 - **Live ticker and pulse:** a scrolling ticker of whale trades and a live summary of whale volume and the biggest trade.
 - **Telegram alerts:** a bot posts new whale trades from both venues to your channel every 15 minutes.
-- **Price gaps (optional):** Kalshi vs Polymarket prices for markets you match by hand.
+- **Price gaps:** the same question priced differently on Kalshi and Polymarket, found automatically. Each gap shows both prices, the cheaper venue, the locked-in edge before fees, both rule texts side by side, and a Share button. The biggest gap gets a banner at the top of the page.
 
 Everything runs on free tiers. The project has **no dependencies**: plain HTML/JS pages, small serverless functions, and a Node script. You need Node 20 or newer only to run it on your own computer.
 
@@ -73,9 +73,18 @@ npm test        # offline tests
 npm run bot     # dry run: prints alerts instead of posting (no token needed)
 ```
 
-## Add price-gap pairs (optional)
+## How price gaps are found
 
-Open `lib/pairs.js` and follow the steps at the top: copy the Polymarket slug and the Kalshi ticker for the same question, and add a one-line `ruleNote` if their rules differ. The Price gaps section appears on the home page once at least one pair is listed.
+`lib/match.js` pulls Polymarket's 1,000 busiest markets and Kalshi's open events (parlays excluded), then pairs questions that ask the same thing:
+
+- Rare words count for more than common ones ("Iohannis" matters, "win" barely does), and synonyms are folded (Federal Reserve → fed, decrease → cut, 25 basis points → 25 bps).
+- Every number must agree: strike prices, basis points and dates. A missing year on one side is allowed.
+- Opposite directions never pair (above vs below, cut vs hike), and close dates must be within 10 days when both are near.
+- Each market is used once; the best-scoring pair wins.
+
+Results are cached for 10 minutes, and each pair shows its match score. Open `/api/gaps?debug=1` on your site to see near-misses: questions that almost matched, with their scores. That's the quickest way to tune `MATCH_THRESHOLD` in `lib/match.js` if pairs are missing or wrong.
+
+To pin a pair you've checked by hand, add it to `lib/pairs.js` (steps at the top of that file). Hand-checked pairs show as **Verified** and always appear.
 
 ## Data sources
 
