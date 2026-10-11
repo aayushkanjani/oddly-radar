@@ -45,25 +45,33 @@
 
   <a class="gapbanner" id="gapBanner" href="#gaps" hidden></a>
 
-  <section class="panel gaps" id="gapsSection">
-    <div class="ph">
-      <div>
-        <h2><span class="live" aria-hidden="true"></span>Price gaps</h2>
-        <div class="sub" id="gapsMeta">Matching questions across Kalshi and Polymarket…</div>
-      </div>
-      <div class="seg" id="gapMin" role="group" aria-label="Minimum gap">
-        <button type="button" data-v="0" aria-pressed="true">All</button>
-        <button type="button" data-v="3" aria-pressed="false">3¢+</button>
-        <button type="button" data-v="5" aria-pressed="false">5¢+</button>
-        <button type="button" data-v="widest" aria-pressed="false" id="widestBtn" hidden>Widest 7d</button>
-      </div>
-    </div>
-    <div id="gaps"></div>
-    <div class="feedfoot">Prices are what YES costs to buy right now on each venue (the ask), as their apps show it. "Lock-in" is before fees and assumes both venues resolve the same way: always read both rules.</div>
-  </section>
+  <nav class="tabs" id="tabs" role="tablist" aria-label="Sections">
+    <a role="tab" href="#gaps" data-tab="gaps" aria-selected="true">Price gaps <span class="tc" id="tcGaps"></span></a>
+    <a role="tab" href="#whales" data-tab="whales" aria-selected="false">Whales</a>
+    <a role="tab" href="#traders" data-tab="traders" aria-selected="false">Traders <span class="tc" id="tcFollow"></span></a>
+  </nav>
 
-  <div class="layout">
-    <section class="panel area-smart">
+  <div class="tabpane" id="pane-gaps" role="tabpanel" data-pane="gaps">
+    <section class="panel gaps" id="gapsSection">
+      <div class="ph">
+        <div>
+          <h2><span class="live" aria-hidden="true"></span>Price gaps</h2>
+          <div class="sub" id="gapsMeta">Matching questions across Kalshi and Polymarket…</div>
+        </div>
+        <div class="seg" id="gapMin" role="group" aria-label="Minimum gap">
+          <button type="button" data-v="0" aria-pressed="true">All</button>
+          <button type="button" data-v="3" aria-pressed="false">3¢+</button>
+          <button type="button" data-v="5" aria-pressed="false">5¢+</button>
+          <button type="button" data-v="widest" aria-pressed="false" id="widestBtn" hidden>Widest 7d</button>
+        </div>
+      </div>
+      <div id="gaps"></div>
+      <div class="feedfoot">Prices are what YES costs to buy right now on each venue (the ask), as their apps show it. "Lock-in" is before fees and assumes both venues resolve the same way: always read both rules.</div>
+    </section>
+  </div>
+
+  <div class="tabpane cols" id="pane-whales" role="tabpanel" data-pane="whales" hidden>
+    <section class="panel">
       <div class="ph">
         <div>
           <h2><span class="live" aria-hidden="true"></span>Smart money</h2>
@@ -77,8 +85,31 @@
       </div>
       <div id="smart"></div>
     </section>
+    <section class="panel">
+      <div class="ph">
+        <h2><span class="live" aria-hidden="true"></span>Whale trades</h2>
+        <label class="muted" style="font-size:12.5px">Over
+          <select id="minUsd" aria-label="Minimum trade size">
+            <option value="1000">$1k</option>
+            <option value="5000">$5k</option>
+            <option value="10000" selected>$10k</option>
+            <option value="50000">$50k</option>
+            <option value="100000">$100k</option>
+          </select>
+        </label>
+        <div class="seg" id="venue" role="group" aria-label="Venue">
+          <button type="button" data-v="all" aria-pressed="true">All</button>
+          <button type="button" data-v="Polymarket" aria-pressed="false">Polymarket</button>
+          <button type="button" data-v="Kalshi" aria-pressed="false">Kalshi</button>
+        </div>
+      </div>
+      <ul class="feed" id="whales"></ul>
+      <div class="feedfoot" id="whalesAt">Polymarket + Kalshi · refreshes every 10s</div>
+    </section>
+  </div>
 
-    <section class="panel area-board">
+  <div class="tabpane cols" id="pane-traders" role="tabpanel" data-pane="traders" hidden>
+    <section class="panel">
       <div class="ph">
         <div>
           <h2>Leaderboard</h2>
@@ -102,40 +133,14 @@
       </table></div>
       <button class="showall" type="button" id="showAll" hidden>Show all traders</button>
     </section>
-
-    <aside class="area-side">
-      <section class="panel">
-        <div class="ph">
-          <h2>Following <span class="muted num" id="followCount" style="font-size:12px"></span></h2>
-          <span class="sub" id="followAt"></span>
-        </div>
-        <ul class="feed short" id="following"></ul>
-      </section>
-
-      <section class="panel">
-        <div class="ph">
-          <h2><span class="live" aria-hidden="true"></span>Whale trades</h2>
-          <label class="muted" style="font-size:12.5px">Over
-            <select id="minUsd" aria-label="Minimum trade size">
-              <option value="1000">$1k</option>
-              <option value="5000">$5k</option>
-              <option value="10000" selected>$10k</option>
-              <option value="50000">$50k</option>
-              <option value="100000">$100k</option>
-            </select>
-          </label>
-          <div class="seg" id="venue" role="group" aria-label="Venue">
-            <button type="button" data-v="all" aria-pressed="true">All</button>
-            <button type="button" data-v="Polymarket" aria-pressed="false">Polymarket</button>
-            <button type="button" data-v="Kalshi" aria-pressed="false">Kalshi</button>
-          </div>
-        </div>
-        <ul class="feed" id="whales"></ul>
-        <div class="feedfoot" id="whalesAt">Polymarket + Kalshi · refreshes every 10s</div>
-      </section>
-    </aside>
+    <section class="panel">
+      <div class="ph">
+        <h2>Following <span class="muted num" id="followCount" style="font-size:12px"></span></h2>
+        <span class="sub" id="followAt"></span>
+      </div>
+      <ul class="feed short" id="following"></ul>
+    </section>
   </div>
-
 
   <footer>Data from Polymarket and Kalshi public APIs. Oddly Radar is independent and not affiliated with either venue. Nothing here is financial advice.</footer>
 </div>

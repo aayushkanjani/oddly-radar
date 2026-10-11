@@ -301,6 +301,7 @@
       const ul = $("following");
       const follows = getFollows();
       $("followCount").textContent = follows.length ? `${follows.length}` : "";
+      $("tcFollow").textContent = follows.length ? `${follows.length}` : "";
       if (!follows.length) {
         ul.innerHTML = `<li class="empty">Tap <b>☆</b> next to any trader in the leaderboard and their trades show up here as they happen.</li>`;
         $("followAt").textContent = "";
@@ -318,6 +319,7 @@
           .map((t) => {
             const key = tradeKey(t);
             const fresh = !firstFollowLoad && !seenFollow.has(key);
+            if (fresh && currentTab !== "traders") $("tabs").querySelector('[data-tab="traders"]').classList.add("new");
             seenFollow.add(key);
             const name = displayName(t.name || names.get(t.wallet), t.wallet);
             return `<li class="frow${fresh ? " fresh" : ""}">
@@ -339,6 +341,7 @@
 
     // Price gaps: the same question priced differently on Kalshi and Polymarket.
     let allGaps = [];
+    let currentTab = "gaps";
     const ctsf = (p) => (Number(p) * 100).toFixed(Number(p) * 100 < 10 ? 1 : 0) + "¢";
     const closeDate = (iso) => {
       const t = Date.parse(iso);
@@ -378,6 +381,7 @@
       }
       allGaps = allGaps.filter((x) => gapKey(x) !== key);
       $("gapsMeta").textContent = `${allGaps.length} ${allGaps.length === 1 ? "question" : "questions"} live on both venues`;
+      $("tcGaps").textContent = allGaps.length ? `${allGaps.length}` : "";
       renderGapBanner();
       renderGaps();
       flash("Thanks. That pair is hidden for you and sent for review.");
@@ -536,6 +540,7 @@
       try {
         const d = await api("/api/gaps");
         allGaps = (d.gaps || []).filter((g) => !reportedSet.has(gapKey(g)));
+        $("tcGaps").textContent = allGaps.length ? `${allGaps.length}` : "";
         loadHistory();
         const sc = d.scanned || {};
         // Kalshi lists every outcome and price level as its own market (each candidate, each BTC strike),
@@ -606,6 +611,37 @@
       seenFollow.clear();
       loadFollowing();
     });
+
+    // ---- tabs: #gaps (default) · #whales · #traders ----
+    // The ticker, headline and biggest-gap banner stay above the tabs on every tab.
+    const TABS = ["gaps", "whales", "traders"];
+    function showTab(name, { scroll = false } = {}) {
+      if (!TABS.includes(name)) name = "gaps";
+      currentTab = name;
+      for (const a of $("tabs").querySelectorAll("[data-tab]")) {
+        const on = a.dataset.tab === name;
+        a.setAttribute("aria-selected", String(on));
+        if (on) a.classList.remove("new");
+      }
+      for (const pane of document.querySelectorAll("[data-pane]")) pane.hidden = pane.dataset.pane !== name;
+      // Keep the tab bar in view when switching from further down the page.
+      const top = $("tabs").getBoundingClientRect().top;
+      if (scroll && top < 0) $("tabs").scrollIntoView({ block: "start" });
+    }
+    function goTab(name) {
+      if (location.hash !== "#" + name) window.history.pushState(null, "", "#" + name);
+      showTab(name, { scroll: true });
+    }
+    document.addEventListener("click", (e) => {
+      const a = e.target.closest('a[href^="#"]');
+      if (!a || !TABS.includes(a.getAttribute("href").slice(1))) return;
+      e.preventDefault();
+      goTab(a.getAttribute("href").slice(1));
+    });
+    window.addEventListener("popstate", () => showTab(location.hash.slice(1)));
+    showTab(location.hash.slice(1));
+    // Tab names match element ids further down; don't let the browser jump to them on load.
+    if (!sharedGap) window.scrollTo(0, 0);
 
     loadBoard();
     loadWhales();
