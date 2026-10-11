@@ -237,7 +237,7 @@ test("wallet API hides settled bets and adds the leaderboard standing", async ()
 });
 
 // ---- v3: Kalshi whales and the merged feed ----
-import { normalizeKalshiTrade, mergeFills, getKalshiWhaleTrades } from "../lib/kalshi.js";
+import { normalizeKalshiTrade, mergeFills, getKalshiWhaleTrades, resetKalshiBuffer } from "../lib/kalshi.js";
 import { getAllWhaleTrades } from "../lib/whales.js";
 
 const kRow = (o) => ({ trade_id: "t1", ticker: "KX-FED", count_fp: "20000.00", yes_price_dollars: "0.6000", no_price_dollars: "0.4000", taker_outcome_side: "yes", taker_side: "yes", created_time: "2026-10-11T00:00:00.123456Z", is_block_trade: false, ...o });
@@ -264,6 +264,7 @@ test("mergeFills joins one order's fills and keeps separate orders apart", () =>
 });
 
 test("getKalshiWhaleTrades merges fills, filters by size and adds market titles", async () => {
+  resetKalshiBuffer();
   const now = new Date().toISOString();
   const page = { cursor: "", trades: [
     kRow({ trade_id: "a", count_fp: "10000.00", created_time: now }),
@@ -308,4 +309,21 @@ test("formatAlert marks Kalshi trades as anonymous and links the market", () => 
   assert.ok(text.includes("On Kalshi · anonymous trader"));
   assert.ok(text.includes('href="https://kalshi.com/markets/kxfed"'));
   assert.ok(text.includes("Fed &lt;cuts&gt;"));
+});
+
+test("Kalshi whales stay in the feed after they scroll out of the latest page", async () => {
+  resetKalshiBuffer();
+  const lookup = async () => ({ question: "Q", url: "https://kalshi.com/markets/q" });
+  const t0 = new Date(Date.now() - 60_000).toISOString();
+  const first = await getKalshiWhaleTrades({ minUsd: 10000, lookup, fetchPage: async () => ({ cursor: "", trades: [kRow({ trade_id: "big", count_fp: "20000.00", created_time: t0 })] }) });
+  assert.equal(first.length, 1);
+  // Next refresh: only small new trades come back, but the earlier whale is remembered.
+  const t1 = new Date().toISOString();
+  const second = await getKalshiWhaleTrades({ minUsd: 10000, lookup, fetchPage: async () => ({ cursor: "", trades: [kRow({ trade_id: "small", count_fp: "10.00", created_time: t1 })] }) });
+  assert.equal(second.length, 1);
+  assert.equal(second[0].tx, "kalshi:big");
+  // A lower filter still shows trades over $1k kept in memory, and nothing under it.
+  const low = await getKalshiWhaleTrades({ minUsd: 1000, lookup, fetchPage: async () => ({ cursor: "", trades: [] }) });
+  assert.deepEqual(low.map((t) => t.tx), ["kalshi:big"]);
+  resetKalshiBuffer();
 });
