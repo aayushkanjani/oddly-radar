@@ -423,7 +423,7 @@ test("following API rejects an empty list and caps, cleans and dedupes wallets",
 });
 
 // ---- v6: automatic price-gap matching ----
-import { tokenize, numbersAgree, matchMarkets, lockIn, toGap } from "../lib/match.js";
+import { tokenize, numbersAgree, matchMarkets, lockIn, toGap, kalshiCandidates } from "../lib/match.js";
 import { mergeGaps } from "../api/gaps.js";
 
 const kM = (question, yes, o = {}) => ({ venue: "Kalshi", id: "K-" + question.slice(0, 12), question, yes, bid: null, ask: null, endDate: "2026-12-10T19:00:00Z", rules: "k rules", url: "https://kalshi.com/markets/x", ...o });
@@ -486,7 +486,7 @@ test("lockIn prices YES on the cheaper venue and NO on the other, using asks and
   assert.equal(li.yesCost.toFixed(2), "0.42");
   assert.equal(li.noCost.toFixed(2), "0.53");
   assert.equal(li.edge.toFixed(2), "0.05");
-  const g = toGap({ kalshi: { ...k, endDate: "2026-12-10T00:00:00Z" }, polymarket: { ...p, endDate: "2026-12-25T00:00:00Z", question: "Q?" }, match: 0.8 });
+  const g = toGap({ kalshi: { ...k, endDate: "2026-12-10T00:00:00Z" }, polymarket: { ...p, endDate: "2026-12-25T00:00:00Z", question: "Q?" }, match: 0.8 }, {}, NOW);
   assert.equal(g.gap.toFixed(2), "0.07");
   assert.match(g.ruleNote, /15 days/);
 });
@@ -526,4 +526,40 @@ test("Kalshi links use the series code, which Kalshi's site accepts", () => {
   assert.equal(kalshiUrl("SENATECA-28"), "https://kalshi.com/markets/senateca");
   assert.equal(kalshiUrl("KXFEDDECISION-27DEC", "KXFEDDECISION"), "https://kalshi.com/markets/kxfeddecision");
   assert.equal(kalshiUrl(""), "https://kalshi.com/markets");
+});
+
+// ---- v6.2: context guards and deadline rules, from the live near-miss list ----
+import { contextConflict } from "../lib/match.js";
+
+test("context words keep different contracts apart", () => {
+  const pairsFor = (k, p) => matchMarkets([kM(k, 0.1, { endDate: "2028-11-07T15:00:00Z" })], [pM(p, 0.12, { endDate: "2028-11-08T05:00:00Z" })], { now: NOW }).pairs.length;
+  assert.equal(pairsFor("Will Gavin Newsom be the nominee for the Vice Presidency for the Democratic party?", "Will Gavin Newsom win the 2028 Democratic presidential nomination?"), 0, "VP nominee ≠ presidential nomination");
+  assert.equal(pairsFor("Will JD Vance and Sarah Huckabee Sanders be the 2028 Republican Presidential ticket?", "Will Sarah Huckabee Sanders win the 2028 Republican presidential nomination?"), 0, "ticket ≠ nomination");
+  assert.equal(pairsFor("Will Wes Moore win the 2028 South Carolina Democratic primary?", "Will Wes Moore win the 2028 Democratic presidential nomination?"), 0, "state primary ≠ nomination");
+  assert.equal(pairsFor("Will Gavin Newsom be the Democratic Presidential nominee in 2028?", "Will Gavin Newsom win the 2028 Democratic presidential nomination?"), 1, "nominee = nomination");
+  assert.ok(contextConflict(tokenize("vice president nominee").words, tokenize("president nominee").words));
+});
+
+test("the same question with deadlines a year apart pairs, without a scary warning", () => {
+  const k = kM("Who will win the next presidential election? J.D. Vance", 0.29, { endDate: "2029-11-07T15:00:00Z" });
+  const p = pM("Will JD Vance win the 2028 US Presidential Election?", 0.31, { endDate: "2028-11-08T04:59:00Z" });
+  const { pairs } = matchMarkets([k], [p], { now: NOW });
+  assert.equal(pairs.length, 1);
+  const g = toGap(pairs[0], {}, NOW);
+  assert.equal(g.ruleNote, "");
+  assert.ok(g.closeDaysApart > 360);
+});
+
+test("deadlines more than 400 days apart never pair", () => {
+  const k = kM("Will Gavin Newsom be the Democratic Presidential nominee?", 0.3, { endDate: "2030-11-07T15:00:00Z" }); // 4 years out: real date, not a placeholder
+  const p = pM("Will Gavin Newsom win the Democratic presidential nomination?", 0.32, { endDate: "2028-11-08T04:59:00Z" });
+  assert.equal(matchMarkets([k], [p], { now: NOW }).pairs.length, 0);
+});
+
+test("Kalshi candidates from events and the flat market list are merged without parlays or duplicates", () => {
+  const m = { ticker: "KXA-1", event_ticker: "KXA-1", title: "Q?", yes_bid_dollars: "0.40", yes_ask_dollars: "0.44", close_time: "2026-12-01T00:00:00Z", status: "active" };
+  const parlay = { ...m, ticker: "KXMVE-1", mve_collection_ticker: "KXMVE" };
+  const out = kalshiCandidates([{ event_ticker: "KXA-1", series_ticker: "KXA", markets: [m] }], [m, parlay]);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].url, "https://kalshi.com/markets/kxa");
 });

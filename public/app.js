@@ -334,8 +334,9 @@
     const ctsf = (p) => (Number(p) * 100).toFixed(Number(p) * 100 < 10 ? 1 : 0) + "¢";
     const closeDate = (iso) => {
       const t = Date.parse(iso);
-      if (!Number.isFinite(t) || t - Date.now() > 3 * 365 * 86400e3) return "";
-      return "closes " + new Date(t).toLocaleDateString([], { day: "numeric", month: "short" });
+      if (!Number.isFinite(t) || t - Date.now() > 8 * 365 * 86400e3) return ""; // placeholders like 2099
+      const sameYear = new Date(t).getFullYear() === new Date().getFullYear();
+      return new Date(t).toLocaleDateString([], sameYear ? { day: "numeric", month: "short" } : { day: "numeric", month: "short", year: "numeric" });
     };
     function gapShareText(g) {
       const handle = CFG.xHandle ? ` via @${CFG.xHandle}` : "";
@@ -374,11 +375,13 @@
           const kCheap = g.cheaper === "Kalshi";
           const edge = g.lockIn ? g.lockIn.edge * 100 : null;
           const badge = g.verified ? `<span class="badge ok">Verified pair</span>` : `<span class="badge auto">Auto-matched · ${Math.round((g.match || 0) * 100)}%</span>`;
-          const dates = [closeDate(g.kalshi.endDate), closeDate(g.polymarket.endDate)].filter(Boolean);
+          // Same deadline: one date. Different deadlines (normal for long-dated questions): show both.
+          const kd = closeDate(g.kalshi.endDate), pd = closeDate(g.polymarket.endDate);
+          const dateLine = (g.closeDaysApart || 0) > 30 && kd && pd ? `closes Kalshi ${kd} · Polymarket ${pd}` : kd || pd ? `closes ${kd || pd}` : "";
           return `<div class="gcard">
             <div style="min-width:0">
               <div class="q">${esc(g.label)}</div>
-              <div class="meta">${badge}${dates[0] ? `<span>${esc(dates[0])}</span>` : ""}${g.category ? `<span>${esc(g.category)}</span>` : ""}</div>
+              <div class="meta">${badge}${dateLine ? `<span>${esc(dateLine)}</span>` : ""}${g.category ? `<span>${esc(g.category)}</span>` : ""}</div>
             </div>
             <div class="prices">
               <a class="vp${kCheap ? " cheap" : ""}" href="${esc(g.kalshi.url)}" target="_blank" rel="noopener" title="${esc(g.kalshi.question)}"><small>Kalshi${kCheap ? " · cheaper" : ""}</small><b>${ctsf(g.kalshi.yes)}</b></a>
