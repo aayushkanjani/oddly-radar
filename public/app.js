@@ -343,8 +343,12 @@
     }
     const shareUrl = (g) => `https://twitter.com/intent/tweet?text=${encodeURIComponent(gapShareText(g))}&url=${encodeURIComponent(location.origin + "/#gaps")}`;
 
+    // Very large gaps on auto-matched pairs are more often two different questions than a real gap.
+    const SUSPECT_GAP = 0.15;
+    const isSuspect = (g) => !g.verified && g.gap > SUSPECT_GAP;
     function renderGapBanner() {
-      const g = allGaps[0];
+      // Only feature pairs we're confident in: hand-verified, or a strong automatic match.
+      const g = allGaps.find((x) => x.verified || ((x.match || 0) >= 0.7 && !isSuspect(x)));
       const el = $("gapBanner");
       if (!g || g.gap < 0.02) {
         el.hidden = true;
@@ -384,6 +388,7 @@
             <div class="foot">
               ${edge != null ? `<span>YES on ${esc(g.cheaper)} + NO on the other: ${edge > 0 ? `locks <b class="up">${edge.toFixed(1)}¢</b> per $1` : `<b>no lock-in</b> after the spread`}</span>` : ""}
               ${g.ruleNote ? `<span class="warn">⚠ ${esc(g.ruleNote)}</span>` : ""}
+              ${isSuspect(g) ? `<span class="warn">⚠ Unusually large gap: these may be different questions. Compare the rules first.</span>` : ""}
               <span class="act"><a class="btn" href="${shareUrl(g)}" target="_blank" rel="noopener">Share</a></span>
             </div>
             <details>

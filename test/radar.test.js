@@ -78,7 +78,7 @@ test("normalizeMarket parses Gamma's JSON-string prices and uses the bid/ask mid
 test("normalizeKalshiMarket reads dollar-string prices", () => {
   const k = normalizeKalshiMarket({ ticker: "T", title: "Q?", yes_bid_dollars: "0.4200", yes_ask_dollars: "0.4400", last_price_dollars: "0.4300", rules_primary: "R1", event_ticker: "EV" });
   assert.equal(k.yes.toFixed(2), "0.43");
-  assert.equal(k.url, "https://kalshi.com/markets/ev");
+  assert.equal(k.url, "https://kalshi.com/markets/ev");  // event "EV" has no dash, so its series is "ev"
   const empty = normalizeKalshiMarket({ ticker: "T", yes_bid_dollars: "0.0000", yes_ask_dollars: "0.0000", last_price_dollars: "0.2500" });
   assert.equal(empty.yes, 0.25);
 });
@@ -497,4 +497,33 @@ test("mergeGaps keeps verified pairs and drops auto pairs that duplicate them", 
   const a2 = { kalshi: { id: "K2" }, polymarket: { id: "p2" }, gap: 0.05 };
   const out = mergeGaps([v], [a1, a2]);
   assert.deepEqual(out.map((g) => g.kalshi.id), ["K2", "K1"]);
+});
+
+// ---- v6.1: regressions from live data ----
+import { entities, entitiesConflict } from "../lib/match.js";
+import { kalshiUrl } from "../lib/kalshi.js";
+
+test("Texas and California Senate races never pair", () => {
+  const kalshi = [kM("Will Republicans win the Senate race in California? Republican party", 0.14, { endDate: "2029-01-03T15:00:00Z" })];
+  const poly = [pM("Will the Republicans win the Texas Senate race in 2026?", 0.36, { endDate: "2026-11-04T00:00:00Z" })];
+  assert.equal(matchMarkets(kalshi, poly, { now: NOW }).pairs.length, 0);
+  assert.ok(entitiesConflict(entities(kalshi[0].question), entities(poly[0].question)));
+});
+
+test("a 2026 question can't pair with a market closing in 2029, even in the same state", () => {
+  const kalshi = [kM("Will Republicans win the Senate race in Texas?", 0.6, { endDate: "2029-01-03T15:00:00Z" })];
+  const poly = [pM("Will the Republicans win the Texas Senate race in 2026?", 0.8, { endDate: "2026-11-04T00:00:00Z" })];
+  assert.equal(matchMarkets(kalshi, poly, { now: NOW }).pairs.length, 0);
+});
+
+test("the same race on both venues still pairs", () => {
+  const kalshi = [kM("Will Republicans win the Senate race in Texas in 2026?", 0.78, { endDate: "2026-11-04T15:00:00Z" })];
+  const poly = [pM("Will the Republicans win the Texas Senate race in 2026?", 0.8, { endDate: "2026-11-04T00:00:00Z" })];
+  assert.equal(matchMarkets(kalshi, poly, { now: NOW }).pairs.length, 1);
+});
+
+test("Kalshi links use the series code, which Kalshi's site accepts", () => {
+  assert.equal(kalshiUrl("SENATECA-28"), "https://kalshi.com/markets/senateca");
+  assert.equal(kalshiUrl("KXFEDDECISION-27DEC", "KXFEDDECISION"), "https://kalshi.com/markets/kxfeddecision");
+  assert.equal(kalshiUrl(""), "https://kalshi.com/markets");
 });
