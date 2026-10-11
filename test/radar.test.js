@@ -807,7 +807,7 @@ test("games match on league, date and both teams, whatever the order, and price 
     pGame("mlb-cle-tb-2026-10-16-x", "Not a plain game slug", ["A", "B"], 0.5, 0.5),
     pGame("mlb-cle-tb-2026-10-17", "Yes/No row", ["Yes", "No"], 0.5, 0.5),
   ];
-  const gaps = matchGames(kalshiGames(kalshi), polyGames(poly));
+  const gaps = matchGames(kalshiGames(kalshi), polyGames(poly, { now: NOW }));
   assert.equal(gaps.length, 2, "Oct 16 TB–CLE and Oct 13 BOS–SJ; nothing for the unmatched NFL game or odd rows");
   const mlb = gaps.find((g) => g.league === "mlb");
   assert.equal(mlb.kalshi.id, "KXMLBGAME-26OCT161800TBCLE-CLE", "priced on Polymarket's first team (Cleveland), on the Oct 16 game");
@@ -832,9 +832,65 @@ test("ambiguous games are skipped, and a one-day date difference only matches wh
     pGame("mlb-cle-tb-2026-10-16", "Guardians vs. Rays", ["Cleveland Guardians", "Tampa Bay Rays"], 0.40, 0.42),
     pGame("nfl-phi-chi-2026-10-18", "Eagles vs. Bears", ["Eagles", "Bears"], 0.6, 0.61),
   ];
-  const gaps = matchGames(kalshiGames(kalshi), polyGames(poly));
+  const gaps = matchGames(kalshiGames(kalshi), polyGames(poly, { now: NOW }));
   assert.ok(!gaps.some((g) => g.league === "mlb"), "doubleheader: two Kalshi games on the same date, so skip");
   const nfl = gaps.find((g) => g.league === "nfl");
   assert.ok(nfl, "late game dated a day apart still matches when it's the only one");
   assert.match(nfl.tieNote, /tie/);
+});
+
+// ---- v10.1: live faults from 2026-10-12 ----
+import { polymarketCandidates } from "../lib/match.js";
+
+test("Fed: 'Hike >25bps' and 'hike more than 25bps' never pair with 'increase by 25 bps'; plain 25bps does", () => {
+  const poly = [pM("Will the Fed increase interest rates by 25 bps after the December 2026 meeting?", 0.745, { endDate: "2026-12-09T19:00:00Z" })];
+  const h26 = kM("Will the Federal Reserve Hike rates by >25bps at their December 2026 meeting? Hike >25bps", 0.025, { id: "KXFEDDECISION-26DEC-H26", endDate: "2026-12-09T18:59:00Z" });
+  const h25 = kM("Will the Federal Reserve Hike rates by 25bps at their December 2026 meeting?", 0.71, { id: "KXFEDDECISION-26DEC-H25", endDate: "2026-12-09T18:59:00Z" });
+  const { pairs } = matchMarkets([h26, h25], poly, { now: NOW });
+  assert.equal(pairs.length, 1);
+  assert.equal(pairs[0].kalshi.id, "KXFEDDECISION-26DEC-H25");
+  const rbiK = kM("Will the Reserve Bank of India hike more than 25bps at the December Monetary Policy Committee meeting?", 0.08, { endDate: "2026-12-04T00:00:00Z" });
+  const rbiP = pM("Will the Reserve Bank of India increase the policy repo rate by 25 bps at the December meeting?", 0.72, { endDate: "2026-12-04T00:00:00Z" });
+  assert.equal(matchMarkets([rbiK], [rbiP], { now: NOW }).pairs.length, 0);
+});
+
+test("'impeached and removed' and 'third-most seats' are different contracts", () => {
+  const t = matchMarkets(
+    [kM("Will Trump be impeached and removed from office? Before his term ends", 0.175, { endDate: "2029-01-20T00:00:00Z" })],
+    [pM("Will Trump be impeached before his term ends?", 0.77, { endDate: "2029-01-20T00:00:00Z" })],
+    { now: NOW },
+  );
+  assert.equal(t.pairs.length, 0);
+  const v = matchMarkets(
+    [kM("Will One Nation hold the third-most seats in the Victorian Legislative Assembly after the 2026 state election?", 0.645, { endDate: "2026-11-28T00:00:00Z" })],
+    [pM("Will One Nation win the most seats in the next Victorian state election?", 0.09, { endDate: "2026-11-28T00:00:00Z" })],
+    { now: NOW },
+  );
+  assert.equal(v.pairs.length, 0);
+});
+
+test("quiet markets with a wide or missing book are left out instead of priced at a stale last trade", () => {
+  const ev = (m) => [{ event_ticker: m.event_ticker, series_ticker: "KXNHLPLAYOFF", markets: [m] }];
+  const base = { ticker: "KXNHLPLAYOFF-27-NSH", event_ticker: "KXNHLPLAYOFF-27", title: "Will the Nashville Predators qualify for the playoffs?", status: "active", close_time: "2027-04-25T14:00:00Z" };
+  assert.equal(kalshiCandidates(ev({ ...base, yes_bid_dollars: "0.25", yes_ask_dollars: "0.74", last_price_dollars: "0.74" })).length, 0, "49¢ spread");
+  assert.equal(kalshiCandidates(ev({ ...base, yes_bid_dollars: "0.02", yes_ask_dollars: "0.27", last_price_dollars: "0.54" })).length, 0, "last trade outside the book");
+  assert.equal(kalshiCandidates(ev({ ...base, yes_bid_dollars: "0.00", yes_ask_dollars: "0.00", last_price_dollars: "0.30" })).length, 0, "no book at all");
+  const ok = kalshiCandidates(ev({ ...base, yes_bid_dollars: "0.27", yes_ask_dollars: "0.30" }));
+  assert.equal(ok.length, 1);
+  assert.equal(ok[0].yes.toFixed(3), "0.285");
+  const polyRow = (bid, ask) => ({ slug: "s", question: "Will the Nashville Predators make the 2026-27 NHL Playoffs?", outcomes: '["Yes","No"]', outcomePrices: '["0.3","0.7"]', bestBid: bid, bestAsk: ask });
+  assert.equal(polymarketCandidates([polyRow(0.1, 0.5)]).length, 0);
+  assert.equal(polymarketCandidates([polyRow(undefined, 0.3)]).length, 0);
+  assert.equal(polymarketCandidates([polyRow(0.28, 0.29)]).length, 1);
+});
+
+test("games that have started or are already played are left out", () => {
+  const now = Date.parse("2026-10-12T00:00:00Z");
+  const k = [kGame("KXNFLGAME-26OCT11DENLAC", "DEN", "Denver wins", "0.21", "0.22"), kGame("KXNFLGAME-26OCT11DENLAC", "LAC", "Los Angeles C wins", "0.78", "0.79")];
+  const yesterday = pGame("nfl-den-lac-2026-10-11", "Broncos vs. Chargers", ["Broncos", "Chargers"], 0.41, 0.42, { gameStartTime: "2026-10-11 20:05:00+00" });
+  assert.equal(matchGames(kalshiGames(k), polyGames([yesterday], { now })).length, 0);
+  const startedToday = pGame("nfl-den-lac-2026-10-12", "Broncos vs. Chargers", ["Broncos", "Chargers"], 0.41, 0.42, { gameStartTime: "2026-10-11 23:30:00+00" });
+  assert.equal(polyGames([startedToday], { now }).length, 0, "kick-off already passed");
+  const upcoming = pGame("nfl-den-lac-2026-10-19", "Broncos vs. Chargers", ["Broncos", "Chargers"], 0.41, 0.42, { gameStartTime: "2026-10-19 20:05:00+00" });
+  assert.equal(polyGames([upcoming], { now }).length, 1);
 });
