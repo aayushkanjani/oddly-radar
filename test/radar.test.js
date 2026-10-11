@@ -192,3 +192,120 @@ test("bot: first run records trades without posting, next run posts only new one
   const r3 = await run(env, { fetchTrades: async () => [fresh, old], send, log });
   assert.equal(r3.posted, 0, "never posts the same trade twice");
 });
+
+// ---- v2: names, standings, settled bets ----
+import { cleanName } from "../lib/polymarket.js";
+import { findStanding } from "../api/wallet.js";
+
+test("cleanName skips wallet-address names, including ones with a numeric suffix", () => {
+  assert.equal(cleanName("0x2c335066FE58fe9237c3d3Dc7b275C2a034a0563-1759935795465", "Brave-Otter"), "Brave-Otter");
+  assert.equal(cleanName(W1, ""), "");
+  assert.equal(cleanName("ethanaz", "Ignored"), "ethanaz");
+  const t = normalizeTrade(v1Trade({ name: W1 + "-123", pseudonym: "Quiet-Fox" }));
+  assert.equal(t.name, "Quiet-Fox");
+});
+
+test("findStanding prefers this week, then month, then day", async () => {
+  const boards = {
+    week: [{ wallet: W2, rank: 1, pnl: 5 }],
+    month: [{ wallet: W1, rank: 7, pnl: 900, volume: 10, name: "sharp" }],
+    day: [{ wallet: W1, rank: 2, pnl: 50 }],
+  };
+  const s = await findStanding(W1, async ({ period }) => boards[period]);
+  assert.equal(s.period, "month");
+  assert.equal(s.rank, 7);
+  assert.equal(await findStanding("0x" + "2".repeat(40), async ({ period }) => boards[period]), null);
+});
+
+test("wallet API hides settled bets and adds the leaderboard standing", async () => {
+  routes.push([/\/v2\/leaderboard\?time_period=week/, { data: [v2Trader(3, W1)] }]);
+  routes.push([/\/v2\/leaderboard/, { data: [] }]);
+  routes.push([/\/positions\?user=/, [
+    { title: "Settled loser", currentValue: 0, cashPnl: -5950, curPrice: 0 },
+    { title: "Live bet", currentValue: 1200, cashPnl: 200, curPrice: 0.6 },
+  ]]);
+  routes.push([/\/trades\?user=/, [v1Trade()]]);
+  const res = fakeRes();
+  await walletHandler({ url: "/api/wallet?addr=" + W1.toUpperCase().replace("0X", "0x") }, res);
+  assert.equal(res.statusCode, 200);
+  const body = JSON.parse(res.body);
+  assert.deepEqual(body.positions.map((p) => p.title), ["Live bet"]);
+  assert.equal(body.stats.openValue, 1200);
+  assert.equal(body.standing.period, "week");
+  assert.equal(body.standing.rank, 3);
+  assert.equal(body.name, "sharp3");
+});
+
+// ---- v3: Kalshi whales and the merged feed ----
+import { normalizeKalshiTrade, mergeFills, getKalshiWhaleTrades } from "../lib/kalshi.js";
+import { getAllWhaleTrades } from "../lib/whales.js";
+
+const kRow = (o) => ({ trade_id: "t1", ticker: "KX-FED", count_fp: "20000.00", yes_price_dollars: "0.6000", no_price_dollars: "0.4000", taker_outcome_side: "yes", taker_side: "yes", created_time: "2026-10-11T00:00:00.123456Z", is_block_trade: false, ...o });
+
+test("normalizeKalshiTrade prices the side the taker bought", () => {
+  const yes = normalizeKalshiTrade(kRow());
+  assert.equal(yes.usd, 12000);
+  const no = normalizeKalshiTrade(kRow({ taker_outcome_side: "no" }));
+  assert.equal(no.usd, 8000);
+  assert.equal(no.ts, Math.floor(Date.parse("2026-10-11T00:00:00.123456Z") / 1000));
+});
+
+test("mergeFills joins one order's fills and keeps separate orders apart", () => {
+  const rows = [
+    normalizeKalshiTrade(kRow({ trade_id: "a", count_fp: "5000.00" })),
+    normalizeKalshiTrade(kRow({ trade_id: "b", count_fp: "5000.00" })),
+    normalizeKalshiTrade(kRow({ trade_id: "c", count_fp: "5000.00", created_time: "2026-10-11T00:00:05.000001Z" })),
+  ];
+  const merged = mergeFills(rows);
+  assert.equal(merged.length, 2);
+  const big = merged.find((m) => m.fills === 2);
+  assert.equal(big.usd, 6000);
+  assert.equal(big.price.toFixed(2), "0.60");
+});
+
+test("getKalshiWhaleTrades merges fills, filters by size and adds market titles", async () => {
+  const now = new Date().toISOString();
+  const page = { cursor: "", trades: [
+    kRow({ trade_id: "a", count_fp: "10000.00", created_time: now }),
+    kRow({ trade_id: "b", count_fp: "10000.00", created_time: now }), // same order: 20k contracts × 0.60 = $12k
+    kRow({ trade_id: "c", count_fp: "100.00", ticker: "KX-SMALL", created_time: now }),
+  ] };
+  const out = await getKalshiWhaleTrades({
+    minUsd: 10000,
+    fetchPage: async () => page,
+    lookup: async (tk) => ({ question: "Fed cuts in December?", url: "https://kalshi.com/markets/kxfed", ticker: tk }),
+  });
+  assert.equal(out.length, 1);
+  assert.equal(out[0].venue, "Kalshi");
+  assert.equal(out[0].usd, 12000);
+  assert.equal(out[0].fills, 2);
+  assert.equal(out[0].title, "Fed cuts in December?");
+  assert.equal(out[0].wallet, "");
+});
+
+test("getAllWhaleTrades merges venues newest first and survives one venue failing", async () => {
+  const pm = [{ venue: "Polymarket", ts: 100, usd: 1 }, { venue: "Polymarket", ts: 300, usd: 1 }];
+  const ks = [{ venue: "Kalshi", ts: 200, usd: 1 }];
+  const both = await getAllWhaleTrades({ sources: { polymarket: async () => pm, kalshi: async () => ks } });
+  assert.deepEqual(both.trades.map((t) => t.ts), [300, 200, 100]);
+  assert.deepEqual(both.errors, {});
+
+  const half = await getAllWhaleTrades({ sources: { polymarket: async () => pm, kalshi: async () => { throw new Error("down"); } } });
+  assert.equal(half.trades.length, 2);
+  assert.equal(half.errors.kalshi, "down");
+
+  const onlyK = await getAllWhaleTrades({ venue: "kalshi", sources: { polymarket: async () => { throw new Error("unused"); }, kalshi: async () => ks } });
+  assert.deepEqual(onlyK.trades.map((t) => t.venue), ["Kalshi"]);
+
+  await assert.rejects(
+    getAllWhaleTrades({ sources: { polymarket: async () => { throw new Error("a"); }, kalshi: async () => { throw new Error("b"); } } }),
+    /a; b/,
+  );
+});
+
+test("formatAlert marks Kalshi trades as anonymous and links the market", () => {
+  const text = formatAlert({ venue: "Kalshi", side: "BUY", outcome: "Yes", price: 0.6, usd: 12000, title: "Fed <cuts>", url: "https://kalshi.com/markets/kxfed", wallet: "" });
+  assert.ok(text.includes("On Kalshi · anonymous trader"));
+  assert.ok(text.includes('href="https://kalshi.com/markets/kxfed"'));
+  assert.ok(text.includes("Fed &lt;cuts&gt;"));
+});

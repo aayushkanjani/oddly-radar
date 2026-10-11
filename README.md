@@ -4,8 +4,9 @@ See what the sharpest prediction-market traders are buying, live.
 
 - **Top traders:** Polymarket leaderboards by profit or volume, for 24h, 7d and 30d.
 - **Wallet pages:** any wallet's open positions, profit and recent trades, with a Share on X button.
-- **Whale feed:** every Polymarket trade over $5k–$100k, refreshed every 30 seconds.
-- **Telegram alerts:** a bot posts new whale trades to your channel every 15 minutes.
+- **Whale feed:** every Polymarket and Kalshi trade over $1k–$100k, merged and refreshed every 10 seconds, with a filter by venue. Kalshi fills from one order are combined so big orders aren't missed.
+- **Live ticker and pulse:** a scrolling ticker of whale trades and a live summary of whale volume and the biggest trade.
+- **Telegram alerts:** a bot posts new whale trades from both venues to your channel every 15 minutes.
 - **Price gaps (optional):** Kalshi vs Polymarket prices for markets you match by hand.
 
 Everything runs on free tiers. The project has **no dependencies**: plain HTML/JS pages, small serverless functions, and a Node script. You need Node 20 or newer only to run it on your own computer.
@@ -82,8 +83,9 @@ All data comes from public APIs, with no keys needed. Endpoints were checked aga
 - Polymarket trades and positions: `data-api.polymarket.com/trades` and `/positions` (v1; the v2 trades endpoint ignores the wallet filter)
 - Polymarket markets: `gamma-api.polymarket.com/markets`
 - Kalshi markets: `api.elections.kalshi.com/trade-api/v2/markets`
+- Kalshi trades: `api.elections.kalshi.com/trade-api/v2/markets/trades` (anonymous; no trader is shown)
 
-If a venue changes its API, the parsing lives in `lib/polymarket.js` and `lib/kalshi.js`, and `npm test` shows what broke. API responses are cached at Vercel's edge for 30–120 seconds, so the site makes few calls to the venues even with many visitors.
+If a venue changes its API, the parsing lives in `lib/polymarket.js` and `lib/kalshi.js`, and `npm test` shows what broke. The whale feed is cached at Vercel's edge for 5 seconds and the page polls every 10 seconds, so a new whale trade shows up within about 15 seconds. Leaderboards are cached for 2 minutes. Truly tick-by-tick updates would need an always-on server holding websocket connections to each venue, which free serverless hosting can't do; that's a good upgrade once the project earns money.
 
 ## Before you charge money
 

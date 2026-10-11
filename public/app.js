@@ -18,27 +18,46 @@
   const cents = (p) => (Number(p) * 100).toFixed(0) + "¢";
   const shortAddr = (a) => (a ? a.slice(0, 6) + "…" + a.slice(-4) : "");
   function ago(ts) {
-    const s = Math.max(0, Math.floor(Date.now() / 1000 - ts));
-    if (s < 60) return s + "s ago";
+    // Trades can look a few seconds "in the future" when the viewer's clock runs slow.
+    const s = Math.floor(Date.now() / 1000 - ts);
+    if (s < 60) return "just now";
     if (s < 3600) return Math.floor(s / 60) + "m ago";
     if (s < 86400) return Math.floor(s / 3600) + "h ago";
     return Math.floor(s / 86400) + "d ago";
   }
+  const clock = (ts) => new Date(ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   function hue(addr) {
     let h = 0;
     for (const c of String(addr)) h = (h * 31 + c.charCodeAt(0)) % 360;
     return h;
   }
-  function avatar(wallet, image) {
-    const bg = `hsl(${hue(wallet)} 55% 45%)`;
-    const inner = image && /^https:\/\//.test(image)
-      ? `<img src="${esc(image)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">`
+  const safeImg = (url) => (url && /^https:\/\//.test(url) ? url : "");
+  function avatar(wallet, image, extra = "") {
+    const bg = `hsl(${hue(wallet)} 60% 48%)`;
+    const src = safeImg(image);
+    const inner = src
+      ? `<img src="${esc(src)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">`
       : esc(String(wallet).slice(2, 4).toUpperCase());
-    return `<span class="avatar" style="background:${bg}">${inner}</span>`;
+    return `<span class="avatar ${extra}" style="background:${bg}">${inner}</span>`;
   }
-  const displayName = (name, wallet) => (name && !WALLET_RE.test(name) ? name : shortAddr(wallet));
+  function micon(t) {
+    const src = safeImg(t.icon);
+    const letter = esc((t.title || "?").trim().charAt(0).toUpperCase());
+    return `<span class="micon">${src ? `<img src="${esc(src)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.replaceWith(document.createTextNode('${letter}'))">` : letter}</span>`;
+  }
+  const displayName = (name, wallet) => (name && !/^0x[0-9a-f]{20,}/i.test(name) ? name : shortAddr(wallet));
+  const PERIOD_WORD = { day: "today", week: "this week", month: "this month" };
+  const PERIOD_SHORT = { day: "24h", week: "7d", month: "30d" };
+  const clip = (s, n) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
   const walletUrl = (w) => `/wallet?addr=${encodeURIComponent(w)}`;
-  const marketUrl = (t) => (t.eventSlug ? `https://polymarket.com/event/${encodeURIComponent(t.eventSlug)}` : t.slug ? `https://polymarket.com/market/${encodeURIComponent(t.slug)}` : "https://polymarket.com");
+  const marketUrl = (t) =>
+    (t.url && /^https:\/\//.test(t.url) && t.url) ||
+    (t.eventSlug ? `https://polymarket.com/event/${encodeURIComponent(t.eventSlug)}` : t.slug ? `https://polymarket.com/market/${encodeURIComponent(t.slug)}` : "https://polymarket.com");
+  const venueBadge = (t) => (t.venue === "Kalshi" ? `<span class="vb ks">Kalshi</span>` : `<span class="vb pm">Polymarket</span>`);
+  const REFRESH_MS = 10000;
+  const tradeKey = (t) => `${t.tx}:${t.wallet}:${t.outcome}:${t.size}`;
+  const sideWord = (t) => (t.side === "SELL" ? "SOLD" : "BOUGHT");
+  const sideClass = (t) => (t.side === "SELL" ? "sell" : "buy");
 
   async function api(path) {
     const res = await fetch(path, { headers: { accept: "application/json" } });
@@ -57,7 +76,10 @@
         e.preventDefault();
         const v = $("findInput").value.trim();
         if (WALLET_RE.test(v)) location.href = walletUrl(v);
-        else $("findInput").setCustomValidity("Paste a full Polymarket wallet address (0x + 40 characters)."), $("findInput").reportValidity();
+        else {
+          $("findInput").setCustomValidity("Paste a full Polymarket wallet address (0x + 40 characters).");
+          $("findInput").reportValidity();
+        }
       });
       $("findInput").addEventListener("input", () => $("findInput").setCustomValidity(""));
     }
@@ -70,7 +92,10 @@
 
   // ---------- home page ----------
   function initHome() {
-    const st = { period: "week", sort: "pnl", min: 10000 };
+    const st = { period: "week", sort: "pnl", min: 10000, venue: "all" };
+    const seen = new Set();
+    let firstWhaleLoad = true;
+    let lastBatch = { trades: [], errors: {} };
 
     function bindSeg(id, key, onChange) {
       const seg = $(id);
@@ -83,42 +108,153 @@
       });
     }
 
+    function podiumCard(t, place) {
+      const byProfit = st.sort === "pnl";
+      const main = byProfit ? money(t.pnl, { sign: true }) : money(t.volume);
+      const side = byProfit ? `Volume <span>${money(t.volume)}</span>` : `Profit <span class="${t.pnl >= 0 ? "up" : "dn"}">${money(t.pnl, { sign: true })}</span>`;
+      return `<a class="pcard p${place}" href="${walletUrl(t.wallet)}">
+        <span class="medal">${place}</span>
+        <div class="who">${avatar(t.wallet, t.image, "lg")}<div><b>${esc(displayName(t.name, t.wallet))}${t.verified ? '<span class="tick" title="Verified">✔</span>' : ""}</b><small>${esc(shortAddr(t.wallet))}${t.xUsername ? " · @" + esc(t.xUsername) : ""}</small></div></div>
+        <span class="big" style="${byProfit ? "" : "color:var(--ink)"}">${main}</span>
+        <div class="meta"><span>${side}</span><span>View bets →</span></div>
+      </a>`;
+    }
+
     async function loadBoard() {
       const tb = $("board");
+      const pod = $("podium");
       tb.innerHTML = stateRow(4, "Loading traders…");
+      pod.innerHTML = [2, 1, 3].map((p) => `<div class="pcard p${p}"><span class="skel" style="width:60%"></span><span class="skel" style="width:40%;height:26px"></span></div>`).join("");
+      const byProfit = st.sort === "pnl";
+      $("mainCol").textContent = byProfit ? "Profit" : "Volume";
+      $("sideCol").textContent = byProfit ? "Volume" : "Profit";
       try {
         const { traders } = await api(`/api/leaderboard?period=${st.period}&sort=${st.sort}&limit=50`);
-        if (!traders.length) return (tb.innerHTML = stateRow(4, "No traders for this period yet."));
-        tb.innerHTML = traders
-          .map(
-            (t) => `<tr class="link" data-w="${esc(t.wallet)}" tabindex="0">
-            <td class="rank">${t.rank}</td>
-            <td><div class="who">${avatar(t.wallet, t.image)}<div><b>${esc(displayName(t.name, t.wallet))}${t.verified ? '<span class="tick" title="Verified">✔</span>' : ""}</b><small>${esc(shortAddr(t.wallet))}${t.xUsername ? " · @" + esc(t.xUsername) : ""}</small></div></div></td>
-            <td class="r num ${t.pnl >= 0 ? "up" : "dn"}">${money(t.pnl, { sign: true })}</td>
-            <td class="r num">${money(t.volume)}</td></tr>`,
-          )
-          .join("");
+        if (!traders.length) {
+          pod.innerHTML = "";
+          tb.innerHTML = stateRow(4, "No traders for this period yet.");
+          return;
+        }
+        const top = traders.slice(0, 3);
+        // Desktop shows 2 · 1 · 3 so the winner stands in the middle; on phones CSS moves #1 first.
+        const order = [top[1], top[0], top[2]].map((t, i) => (t ? podiumCard(t, [2, 1, 3][i]) : "")).join("");
+        pod.innerHTML = order;
+
+        const rest = traders.slice(3);
+        const VISIBLE = 17; // ranks 4–20 before "Show all"
+        $("board").classList.add("collapsed");
+        $("showAll").hidden = rest.length <= VISIBLE;
+        $("showAll").textContent = `Show all ${traders.length} traders`;
+        const mainVal = (t) => (byProfit ? t.pnl : t.volume);
+        const max = Math.max(1, ...rest.map((t) => Math.abs(mainVal(t))));
+        tb.innerHTML = rest.length
+          ? rest
+              .map((t, i) => {
+                const v = mainVal(t);
+                const pct = Math.max(2, Math.round((Math.abs(v) / max) * 100));
+                const mainTxt = byProfit ? money(v, { sign: true }) : money(v);
+                const sideTxt = byProfit ? money(t.volume) : money(t.pnl, { sign: true });
+                const mainCls = byProfit ? (v >= 0 ? "up" : "dn") : "";
+                const sideCls = byProfit ? "" : t.pnl >= 0 ? "up" : "dn";
+                return `<tr class="link${i >= VISIBLE ? " more" : ""}" data-w="${esc(t.wallet)}" tabindex="0">
+                  <td class="rank">${t.rank}</td>
+                  <td><div class="who">${avatar(t.wallet, t.image)}<div><b>${esc(displayName(t.name, t.wallet))}${t.verified ? '<span class="tick" title="Verified">✔</span>' : ""}</b><small>${esc(shortAddr(t.wallet))}${t.xUsername ? " · @" + esc(t.xUsername) : ""}</small></div></div></td>
+                  <td class="r"><div class="pnlcell"><span class="num ${mainCls}">${mainTxt}</span><span class="bar"><i style="width:${pct}%"></i></span></div></td>
+                  <td class="r num ${sideCls}">${sideTxt}</td></tr>`;
+              })
+              .join("")
+          : stateRow(4, "Only three traders on the board for this period.");
       } catch (err) {
+        pod.innerHTML = "";
         tb.innerHTML = stateRow(4, err.message, true);
       }
+    }
+
+    async function loadPulseTop() {
+      try {
+        const { traders } = await api("/api/leaderboard?period=week&sort=pnl&limit=1");
+        const t = traders[0];
+        if (!t) throw new Error("none");
+        $("pTop").textContent = money(t.pnl, { sign: true });
+        $("pTopSub").innerHTML = `<a href="${walletUrl(t.wallet)}">${esc(displayName(t.name, t.wallet))}</a> · ${esc(money(t.volume))} traded`;
+      } catch {
+        $("pTop").textContent = "—";
+      }
+    }
+
+    function renderTicker(trades) {
+      if (!trades.length) return;
+      const items = trades
+        .slice(0, 20)
+        .map(
+          (t) => `<a class="tk" href="${esc(marketUrl(t))}" target="_blank" rel="noopener"><span class="dot"></span>${venueBadge(t)}<b>${money(t.usd)}</b><span class="side ${sideClass(t)}">${sideWord(t)} ${esc(clip(t.outcome || "", 14))}</span><span>${esc(clip(t.title, 46))}</span></a>`,
+        )
+        .join("");
+      // Two copies so the -50% marquee loops without a gap.
+      $("ticker").innerHTML = items + items;
+    }
+
+    function renderPulse(trades) {
+      if (!trades.length) {
+        $("pVol").textContent = "—";
+        $("pBig").textContent = "—";
+        return;
+      }
+      const total = trades.reduce((s, t) => s + t.usd, 0);
+      const oldest = Math.min(...trades.map((t) => t.ts));
+      const big = trades.reduce((a, b) => (b.usd > a.usd ? b : a));
+      const venues = new Set(trades.map((t) => t.venue || "Polymarket"));
+      $("pVol").textContent = money(total);
+      $("pVolSub").textContent = `${trades.length} trades over ${money(st.min)} since ${clock(oldest)} · ${[...venues].join(" + ")}`;
+      $("pBig").textContent = money(big.usd);
+      $("pBigSub").innerHTML = `${sideWord(big).toLowerCase()} ${esc(big.outcome)} on <a href="${esc(marketUrl(big))}" target="_blank" rel="noopener">${esc(clip(big.title, 48))}</a> · ${esc(big.venue || "Polymarket")}`;
+    }
+
+    function renderWhales() {
+      const ul = $("whales");
+      const trades = lastBatch.trades.filter((t) => st.venue === "all" || (t.venue || "Polymarket") === st.venue);
+      if (!trades.length) {
+        const where = st.venue === "all" ? "" : ` on ${st.venue}`;
+        ul.innerHTML = `<li class="state">No trades over ${money(st.min)}${where} in the last hour or so. Try a lower minimum.</li>`;
+        return;
+      }
+      const max = Math.max(...trades.map((t) => t.usd));
+      ul.innerHTML = trades
+        .map((t) => {
+          const key = tradeKey(t);
+          const fresh = !firstWhaleLoad && !seen.has(key);
+          seen.add(key);
+          const pct = Math.max(4, Math.round((t.usd / max) * 100));
+          const who =
+            t.venue === "Kalshi"
+              ? `<span>anonymous${t.fills > 1 ? ` · ${t.fills} fills` : ""}</span>`
+              : `<a href="${walletUrl(t.wallet)}">${esc(displayName(t.name, t.wallet))}</a>`;
+          return `<li class="whale${fresh ? " fresh" : ""}">
+            ${micon(t)}
+            <div style="min-width:0">
+              <div class="row1"><span class="amt">${money(t.usd)}</span><span class="pill ${sideClass(t)}">${sideWord(t)} ${esc(t.outcome || "")}</span></div>
+              <a class="q" href="${esc(marketUrl(t))}" target="_blank" rel="noopener">${esc(t.title)}</a>
+              <div class="meta">${venueBadge(t)}<span>at ${cents(t.price)}</span>${who}<span>${ago(t.ts)}</span></div>
+              <div class="size"><i class="${sideClass(t)}" style="width:${pct}%"></i></div>
+            </div>
+          </li>`;
+        })
+        .join("");
+      firstWhaleLoad = false;
     }
 
     async function loadWhales() {
       const ul = $("whales");
       if (!ul.children.length) ul.innerHTML = `<li class="state">Loading big trades…</li>`;
       try {
-        const { trades } = await api(`/api/whales?min=${st.min}&limit=40`);
-        if (!trades.length) return (ul.innerHTML = `<li class="state">No trades over ${money(st.min)} in the latest batch.</li>`);
-        ul.innerHTML = trades
-          .map(
-            (t) => `<li>
-            <div class="row1"><span class="amt">${money(t.usd)}</span><span class="pill ${t.side === "SELL" ? "sell" : "buy"}">${t.side === "SELL" ? "SOLD" : "BOUGHT"} ${esc(t.outcome || "")}</span></div>
-            <a class="q" href="${marketUrl(t)}" target="_blank" rel="noopener">${esc(t.title)}</a>
-            <div class="meta"><span>at ${cents(t.price)}</span><a href="${walletUrl(t.wallet)}">${esc(displayName(t.name, t.wallet))}</a><span>${ago(t.ts)}</span></div>
-          </li>`,
-          )
-          .join("");
-        $("whalesAt").textContent = "Updated " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        const data = await api(`/api/whales?min=${st.min}&venue=all&limit=80`);
+        lastBatch = { trades: data.trades || [], errors: data.errors || {} };
+        renderTicker(lastBatch.trades);
+        renderPulse(lastBatch.trades);
+        renderWhales();
+        const down = Object.keys(lastBatch.errors);
+        const note = down.length ? ` · ${down.map((v) => v[0].toUpperCase() + v.slice(1)).join(", ")} unavailable right now` : "";
+        $("whalesAt").textContent = "Updated " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) + " · refreshes every 10 seconds" + note;
       } catch (err) {
         ul.innerHTML = `<li class="state err">${esc(err.message)}</li>`;
       }
@@ -130,7 +266,10 @@
         if (!pairsConfigured) return; // section stays hidden until you add pairs in lib/pairs.js
         $("gapsSection").hidden = false;
         const box = $("gaps");
-        if (!gaps.length) return (box.innerHTML = `<div class="state">Couldn't load the matched markets right now.</div>`);
+        if (!gaps.length) {
+          box.innerHTML = `<div class="state">Couldn't load the matched markets right now.</div>`;
+          return;
+        }
         box.innerHTML = gaps
           .map((g) => {
             const pts = g.gap * 100;
@@ -151,10 +290,20 @@
 
     bindSeg("period", "period", loadBoard);
     bindSeg("sort", "sort", loadBoard);
+    bindSeg("venue", "venue", () => {
+      firstWhaleLoad = true; // switching views shouldn't flash every card as "new"
+      renderWhales();
+    });
     $("minUsd").addEventListener("change", (e) => {
       st.min = Number(e.target.value);
       $("whales").innerHTML = "";
+      firstWhaleLoad = true;
+      seen.clear();
       loadWhales();
+    });
+    $("showAll").addEventListener("click", () => {
+      const open = $("board").classList.toggle("collapsed") === false;
+      $("showAll").textContent = open ? "Show fewer" : `Show all traders`;
     });
     $("board").addEventListener("click", (e) => {
       const tr = e.target.closest("tr[data-w]");
@@ -166,20 +315,41 @@
     });
 
     loadBoard();
+    loadPulseTop();
     loadWhales();
     loadGaps();
     setInterval(() => {
       if (!document.hidden) loadWhales();
-    }, 30000);
+    }, REFRESH_MS);
+    // Catch up immediately when the visitor comes back to the tab.
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) loadWhales();
+    });
   }
 
   // ---------- wallet page ----------
+  function moveBar(avg, cur) {
+    const a = Math.min(1, Math.max(0, Number(avg) || 0)) * 100;
+    const c = Math.min(1, Math.max(0, Number(cur) || 0)) * 100;
+    const color = c >= a ? "var(--good)" : "var(--no)";
+    const lo = Math.min(a, c), hi = Math.max(a, c);
+    return `<div style="display:flex;align-items:center;gap:10px">
+      <div class="move" title="Entry ${a.toFixed(0)}¢, now ${c.toFixed(0)}¢">
+        <span class="rail"></span>
+        <span class="seg" style="left:${lo}%;width:${Math.max(1, hi - lo)}%;background:${color}"></span>
+        <span class="dot" style="left:${a}%;background:var(--muted)"></span>
+        <span class="dot" style="left:${c}%;background:${color}"></span>
+      </div>
+      <span class="num muted" style="font-size:12.5px;white-space:nowrap">${a.toFixed(0)}¢ → <b style="color:${color}">${c.toFixed(0)}¢</b></span>
+    </div>`;
+  }
+
   async function initWallet() {
     const addr = (new URLSearchParams(location.search).get("addr") || "").trim();
     if (!WALLET_RE.test(addr)) {
       $("profileName").textContent = "Wallet not found";
       $("profileAddr").textContent = "Paste a full Polymarket wallet address in the search box above.";
-      $("positions").innerHTML = stateRow(5, "No wallet to show.");
+      $("positions").innerHTML = stateRow(4, "No wallet to show.");
       $("trades").innerHTML = stateRow(5, "No wallet to show.");
       return;
     }
@@ -190,36 +360,47 @@
       const name = displayName(d.name, d.wallet);
       document.title = `${name} · Oddly Radar`;
       $("profileName").textContent = name;
-      $("profileAvatar").outerHTML = avatar(d.wallet).replace('class="avatar"', 'class="avatar" id="profileAvatar"');
+      $("profileAvatar").outerHTML = avatar(d.wallet).replace('class="avatar "', 'class="avatar" id="profileAvatar"');
+
       const s = d.stats;
-      $("stats").innerHTML = [
-        ["Open positions", s.openPositions],
+      const st = d.standing;
+      const pnlCell = (v) => `<span class="${v >= 0 ? "up" : "dn"}">${money(v, { sign: true })}</span>`;
+
+      if (st) {
+        $("record").hidden = false;
+        $("recRank").textContent = `#${st.rank} ${PERIOD_WORD[st.period]}`;
+        $("recBig").textContent = money(st.pnl, { sign: true });
+        $("recBig").className = "big " + (st.pnl >= 0 ? "up" : "dn");
+        $("recSub").textContent = `profit · ${money(st.volume)} traded`;
+      }
+
+      const cards = [
+        ["Open bets", s.openPositions],
         ["Open value", money(s.openValue)],
-        ["Unrealized P&L", `<span class="${s.openPnl >= 0 ? "up" : "dn"}">${money(s.openPnl, { sign: true })}</span>`],
-        ["Positions in profit", s.winningShare == null ? "—" : Math.round(s.winningShare * 100) + "%"],
+        ["Unrealized P&L", pnlCell(s.openPnl)],
+        st ? [`Volume, ${PERIOD_SHORT[st.period]}`, money(st.volume)] : ["Bets in profit", s.winningShare == null ? "—" : Math.round(s.winningShare * 100) + "%"],
         ["Last trade", s.lastTradeAt ? ago(s.lastTradeAt) : "—"],
-      ]
-        .map(([k, v]) => `<div class="stat"><small>${k}</small><b>${v}</b></div>`)
-        .join("");
+      ];
+      $("stats").innerHTML = cards.map(([k, v]) => `<div class="stat"><small>${k}</small><b>${v}</b></div>`).join("");
 
       $("positions").innerHTML = d.positions.length
         ? d.positions
             .slice(0, 25)
             .map(
-              (p) => `<tr><td class="mkt"><a href="${marketUrl(p)}" target="_blank" rel="noopener">${esc(p.title)}</a><small>${esc(p.outcome)}</small></td>
-              <td class="r num">${cents(p.avgPrice)}</td><td class="r num">${cents(p.curPrice)}</td>
+              (p) => `<tr><td class="mkt"><div class="mrow">${micon(p)}<div style="min-width:0"><a href="${marketUrl(p)}" target="_blank" rel="noopener">${esc(p.title)}</a><small>${esc(p.outcome)}${p.endDate ? " · ends " + esc(new Date(p.endDate).toLocaleDateString([], { day: "numeric", month: "short" })) : ""}</small></div></div></td>
+              <td>${moveBar(p.avgPrice, p.curPrice)}</td>
               <td class="r num">${money(p.currentValue)}</td>
               <td class="r num ${p.cashPnl >= 0 ? "up" : "dn"}">${money(p.cashPnl, { sign: true })}</td></tr>`,
             )
             .join("")
-        : stateRow(5, "No open positions.");
+        : stateRow(4, "No open bets right now. Their recent trades are below.");
 
       $("trades").innerHTML = d.trades.length
         ? d.trades
             .slice(0, 25)
             .map(
-              (t) => `<tr><td class="mkt"><a href="${marketUrl(t)}" target="_blank" rel="noopener">${esc(t.title)}</a><small>${esc(t.outcome)}</small></td>
-              <td><span class="pill ${t.side === "SELL" ? "sell" : "buy"}">${t.side === "SELL" ? "SOLD" : "BOUGHT"}</span></td>
+              (t) => `<tr><td class="mkt"><div class="mrow">${micon(t)}<div style="min-width:0"><a href="${marketUrl(t)}" target="_blank" rel="noopener">${esc(t.title)}</a><small>${esc(t.outcome)}</small></div></div></td>
+              <td><span class="pill ${sideClass(t)}">${sideWord(t)}</span></td>
               <td class="r num">${cents(t.price)}</td><td class="r num">${money(t.usd)}</td><td class="r muted">${ago(t.ts)}</td></tr>`,
             )
             .join("")
@@ -227,12 +408,23 @@
 
       const top = d.positions[0];
       const handle = CFG.xHandle ? ` via @${CFG.xHandle}` : "";
-      const text = top
-        ? `This Polymarket wallet holds ${money(s.openValue)} in open bets. Biggest: "${top.title}" (${top.outcome}).${handle}`
-        : `Tracking this Polymarket wallet on Oddly Radar${handle}`;
+      const bet = top ? `"${clip(top.title, 70)}" (${top.outcome}, ${money(top.currentValue)})` : "";
+      let text;
+      if (st && st.pnl > 0) {
+        text = `${name} is #${st.rank} on Polymarket ${PERIOD_WORD[st.period]}: ${money(st.pnl, { sign: true })} profit.` +
+          (top ? ` Biggest open bet: ${bet}.` : "") + ` See every position${handle}:`;
+      } else if (top) {
+        text = `${name} has ${money(s.openValue)} riding on Polymarket. Biggest bet: ${bet}.${handle}`;
+      } else {
+        const last = d.trades[0];
+        text = last
+          ? `${name} just ${last.side === "SELL" ? "sold" : "bought"} ${money(last.usd)} of "${clip(last.title, 70)}" on Polymarket.${handle}`
+          : `Tracking ${name} on Polymarket${handle}`;
+      }
       $("shareX").href = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(location.href)}`;
     } catch (err) {
-      $("positions").innerHTML = stateRow(5, err.message, true);
+      $("profileName").textContent = "Couldn't load this wallet";
+      $("positions").innerHTML = stateRow(4, err.message, true);
       $("trades").innerHTML = stateRow(5, err.message, true);
     }
     $("copyLink").addEventListener("click", () => {

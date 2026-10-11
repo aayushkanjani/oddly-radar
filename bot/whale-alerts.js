@@ -11,7 +11,14 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { getWhaleTrades } from "../lib/polymarket.js";
+import { getAllWhaleTrades } from "../lib/whales.js";
+
+// Polymarket and Kalshi together. If one venue is down, alerts still flow from the other.
+async function fetchAllWhales({ minUsd }) {
+  const { trades, errors } = await getAllWhaleTrades({ minUsd, limit: 150 });
+  for (const [venue, msg] of Object.entries(errors)) console.warn(`${venue} skipped this run: ${msg}`);
+  return trades;
+}
 
 const MAX_PER_RUN = 10; // keeps a busy hour from flooding the channel
 const MAX_SEEN = 2000;
@@ -46,14 +53,14 @@ export function nextState(trades, state) {
 
 export function formatAlert(t, siteUrl = "") {
   const verb = t.side === "SELL" ? "SOLD" : "BOUGHT";
-  const market = t.eventSlug ? `https://polymarket.com/event/${t.eventSlug}` : `https://polymarket.com/market/${t.slug}`;
-  const who = t.name && !/^0x[a-fA-F0-9]{40}$/.test(t.name) ? t.name : `${t.wallet.slice(0, 6)}…${t.wallet.slice(-4)}`;
+  const market = t.url || (t.eventSlug ? `https://polymarket.com/event/${t.eventSlug}` : `https://polymarket.com/market/${t.slug}`);
+  const head = `🐋 <b>${money(t.usd)}</b> ${verb} <b>${escHtml(t.outcome)}</b> at ${Math.round(t.price * 100)}¢`;
+  if (t.venue === "Kalshi") {
+    return [head, `<a href="${market}">${escHtml(t.title)}</a>`, `On Kalshi · anonymous trader`].join("\n");
+  }
+  const who = t.name && !/^0x[0-9a-f]{20,}/i.test(t.name) ? t.name : `${t.wallet.slice(0, 6)}…${t.wallet.slice(-4)}`;
   const walletLink = siteUrl ? `${siteUrl.replace(/\/$/, "")}/wallet?addr=${t.wallet}` : `https://polymarket.com/profile/${t.wallet}`;
-  return [
-    `🐋 <b>${money(t.usd)}</b> ${verb} <b>${escHtml(t.outcome)}</b> at ${Math.round(t.price * 100)}¢`,
-    `<a href="${market}">${escHtml(t.title)}</a>`,
-    `Trader: <a href="${walletLink}">${escHtml(who)}</a>`,
-  ].join("\n");
+  return [head, `<a href="${market}">${escHtml(t.title)}</a>`, `On Polymarket · trader <a href="${walletLink}">${escHtml(who)}</a>`].join("\n");
 }
 
 async function loadState(file) {
@@ -83,7 +90,7 @@ async function sendTelegram(token, chatId, text) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export async function run(env = process.env, { fetchTrades = getWhaleTrades, send = sendTelegram, log = console.log } = {}) {
+export async function run(env = process.env, { fetchTrades = fetchAllWhales, send = sendTelegram, log = console.log } = {}) {
   const minUsd = Number(env.MIN_USD) || 10000;
   const stateFile = env.STATE_FILE || ".state/seen.json";
   const dryRun = !env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID;
