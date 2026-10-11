@@ -3,6 +3,7 @@
 // home page with that gap highlighted; link-preview crawlers read the tags and stop there.
 import { loadPair, TICKER_RE, SLUG_RE } from "./gapimage.js";
 import { query } from "../lib/respond.js";
+import { buyPrice } from "../lib/match.js";
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const cents = (v) => Math.round(Number(v) * 100) + "¢";
@@ -12,7 +13,7 @@ export function sharePage({ origin, k, p, pair }) {
   const img = `${origin}/api/gapimage?k=${encodeURIComponent(k)}&p=${encodeURIComponent(p)}`;
   const title = pair ? `Same bet. Two prices. ${pair.question}` : "Oddly Radar · Same bet. Two prices.";
   const desc = pair
-    ? `${cents(pair.kalshi.yes)} on Kalshi, ${cents(pair.polymarket.yes)} on Polymarket. Live price gaps on Oddly Radar.`
+    ? `${cents(buyPrice(pair.kalshi))} on Kalshi, ${cents(buyPrice(pair.polymarket))} on Polymarket. Live price gaps on Oddly Radar.`
     : "Live price gaps between Kalshi and Polymarket.";
   return `<!doctype html>
 <html lang="en"><head>

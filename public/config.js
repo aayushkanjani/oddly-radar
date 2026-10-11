@@ -6,6 +6,4 @@ window.RADAR_CONFIG = {
   xHandle: "",
   // Waitlist form for the Pro plan (Tally, Google Forms, Typeform)
   waitlistUrl: "https://form.typeform.com/to/zouGlwxe",
-  // Where "Report a wrong pair" sends people: a pre-filled GitHub issue on your repo
-  reportUrl: "https://github.com/aayushkanjani/oddly-radar/issues/new",
 };

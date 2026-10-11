@@ -151,6 +151,7 @@ export function nextGapState(posted, state, { now = Date.now() } = {}) {
   return { alerted };
 }
 
+const bp = (m) => (m && Number(m.buy) > 0 ? m.buy : m && Number(m.ask) > 0 ? m.ask : m?.yes);
 const cents = (p) => {
   const v = Number(p) * 100;
   return (v < 10 ? v.toFixed(1) : v.toFixed(0)) + "¢";
@@ -163,8 +164,8 @@ export function formatGapCaption(g, siteUrl = "") {
     `⚖️ <b>${cents(g.gap)} gap</b> · same bet, two prices`,
     `${escHtml(g.label)}`,
     ``,
-    `Kalshi <b>${cents(g.kalshi.yes)}</b>${kCheap ? " ← cheaper" : ""}`,
-    `Polymarket <b>${cents(g.polymarket.yes)}</b>${kCheap ? "" : " ← cheaper"}`,
+    `Kalshi <b>${cents(bp(g.kalshi))}</b>${kCheap ? " ← cheaper" : ""}`,
+    `Polymarket <b>${cents(bp(g.polymarket))}</b>${kCheap ? "" : " ← cheaper"}`,
   ];
   if (g.ruleNote) lines.push(``, `⚠️ ${escHtml(g.ruleNote)}`);
   if (!g.verified) lines.push(``, `<i>Auto-matched (${Math.round((g.match || 0) * 100)}%). Read both rules before trading.</i>`);

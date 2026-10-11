@@ -5,6 +5,7 @@ import { getKalshiMarket } from "../lib/kalshi.js";
 import { getMarketBySlug } from "../lib/polymarket.js";
 import { renderGapImage } from "../lib/ogimage.js";
 import { query } from "../lib/respond.js";
+import { buyPrice } from "../lib/match.js";
 
 export const TICKER_RE = /^[A-Za-z0-9._-]{2,80}$/;
 export const SLUG_RE = /^[a-z0-9-]{2,200}$/;
@@ -31,7 +32,7 @@ export default async function handler(req, res) {
       return;
     }
     const host = req.headers?.host && /^[a-z0-9.-]+$/i.test(req.headers.host) ? req.headers.host : undefined;
-    const png = renderGapImage({ question: pair.question, kalshiYes: pair.kalshi.yes, polyYes: pair.polymarket.yes, site: host });
+    const png = renderGapImage({ question: pair.question, kalshiYes: buyPrice(pair.kalshi), polyYes: buyPrice(pair.polymarket), site: host });
     res.statusCode = 200;
     res.setHeader("content-type", "image/png");
     res.setHeader("cache-control", "public, s-maxage=300, stale-while-revalidate=900");

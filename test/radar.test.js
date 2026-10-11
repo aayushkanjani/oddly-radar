@@ -894,3 +894,66 @@ test("games that have started or are already played are left out", () => {
   const upcoming = pGame("nfl-den-lac-2026-10-19", "Broncos vs. Chargers", ["Broncos", "Chargers"], 0.41, 0.42, { gameStartTime: "2026-10-19 20:05:00+00" });
   assert.equal(polyGames([upcoming], { now }).length, 1);
 });
+
+// ---- buy prices (2026-10-12: Blackhawks playoffs) ----
+test("gaps compare the price to buy YES on each venue, as the apps show it", () => {
+  // Kalshi KXNHLPLAYOFF-27-CHI: bid 14¢ / ask 24¢. Polymarket: bid 8¢ / ask 11¢ (its app shows 11¢).
+  const k = { venue: "Kalshi", id: "KXNHLPLAYOFF-27-CHI", yes: 0.19, bid: 0.14, ask: 0.24, endDate: "2027-04-20T00:00:00Z" };
+  const p = { venue: "Polymarket", id: "will-chi-make-playoffs", yes: 0.095, bid: 0.08, ask: 0.11, endDate: "2027-04-20T00:00:00Z", question: "Blackhawks playoffs?" };
+  const g = toGap({ kalshi: k, polymarket: p, match: 0.9 }, {}, NOW);
+  assert.equal(g.polymarket.buy, 0.11);
+  assert.equal(g.kalshi.buy, 0.24);
+  assert.ok(Math.abs(g.gap - 0.13) < 1e-9);
+  assert.equal(g.cheaper, "Polymarket");
+  // YES at 11¢ on Polymarket + NO at 1 − 14¢ = 86¢ on Kalshi → 97¢ for a sure $1.
+  assert.ok(Math.abs(g.lockIn.edge - 0.03) < 1e-9);
+});
+
+test("buyPrice falls back to the mid when there is no ask", async () => {
+  const { buyPrice } = await import("../lib/match.js");
+  assert.equal(buyPrice({ yes: 0.4, ask: null }), 0.4);
+  assert.equal(buyPrice({ yes: 0.4, ask: 0.42 }), 0.42);
+});
+
+// ---- reports ----
+test("reports count distinct visitors and hide a pair at the threshold", async () => {
+  const { recordReport, reporterId } = await import("../lib/reports.js");
+  const sets = new Map();
+  const run = async (cmds) =>
+    cmds.map(([op, key, ...rest]) => {
+      if (op === "SADD") {
+        if (!sets.has(key)) sets.set(key, new Set());
+        rest.forEach((v) => sets.get(key).add(v));
+        return 1;
+      }
+      if (op === "SCARD") return sets.get(key)?.size || 0;
+      return "OK";
+    });
+  const config = { url: "https://x", token: "t" };
+  const pair = "KXTEST-1|some-slug";
+  assert.notEqual(reporterId("1.1.1.1"), reporterId("2.2.2.2"));
+  let r = await recordReport({ pair, ip: "1.1.1.1" }, { config, run });
+  r = await recordReport({ pair, ip: "1.1.1.1" }, { config, run }); // same visitor twice
+  assert.equal(r.count, 1);
+  assert.equal(r.blocked, false);
+  await recordReport({ pair, ip: "2.2.2.2" }, { config, run });
+  r = await recordReport({ pair, ip: "3.3.3.3" }, { config, run });
+  assert.equal(r.blocked, true);
+  assert.ok(sets.get("rp:blocked").has(pair));
+  await assert.rejects(recordReport({ pair: "bad pair", ip: "x" }, { config, run }));
+  assert.deepEqual(await recordReport({ pair, ip: "x" }, { config: null, run }), { stored: false, count: 0, blocked: false });
+});
+
+test("POST /api/report validates the pair and answers ok without storage", async () => {
+  const { default: handler } = await import("../api/report.js");
+  const call = async (method, body) => {
+    const res = { statusCode: 0, headers: {}, setHeader(k, v) { this.headers[k] = v; }, end(b) { this.body = b; } };
+    await handler({ method, body, headers: {}, url: "/api/report" }, res);
+    return { status: res.statusCode, json: JSON.parse(res.body) };
+  };
+  assert.equal((await call("GET")).status, 405);
+  assert.equal((await call("POST", { pair: "nope" })).status, 400);
+  const ok = await call("POST", { pair: "KXTEST-1|some-slug", label: "Q" });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.json.ok, true);
+});

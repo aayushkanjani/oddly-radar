@@ -16,6 +16,8 @@
     return pre + s;
   }
   const cents = (p) => (Number(p) * 100).toFixed(0) + "¢";
+  // The price to buy YES (the ask), as each venue's app shows it; mid only if no ask came back.
+  const bp = (m) => (m && Number(m.buy) > 0 ? m.buy : m && Number(m.ask) > 0 ? m.ask : m?.yes);
   const shortAddr = (a) => (a ? a.slice(0, 6) + "…" + a.slice(-4) : "");
   function ago(ts) {
     // Trades can look a few seconds "in the future" when the viewer's clock runs slow.
@@ -346,26 +348,48 @@
     };
     function gapShareText(g) {
       const handle = CFG.xHandle ? ` via @${CFG.xHandle}` : "";
-      return `Same bet, two prices: "${clip(g.label, 80)}" is ${cents(g.kalshi.yes)} on Kalshi and ${cents(g.polymarket.yes)} on Polymarket. That's a ${(g.gap * 100).toFixed(0)}¢ gap${handle}`;
+      return `Same bet, two prices: "${clip(g.label, 80)}" is ${cents(bp(g.kalshi))} on Kalshi and ${cents(bp(g.polymarket))} on Polymarket. That's a ${(g.gap * 100).toFixed(0)}¢ gap${handle}`;
     }
-    // "Report" opens a pre-filled GitHub issue with a ready-to-paste line for BLOCKED in lib/pairs.js.
-    function reportUrl(g) {
-      if (!CFG.reportUrl || !/^https:\/\//.test(CFG.reportUrl)) return "";
-      const body = [
-        "This automatic pair looks wrong (two different questions).",
-        "",
-        `Kalshi: ${g.kalshi.question}`,
-        g.kalshi.url,
-        "",
-        `Polymarket: ${g.polymarket.question}`,
-        g.polymarket.url,
-        "",
-        "To remove it, add this line to BLOCKED in lib/pairs.js:",
-        "```",
-        `{ kalshi: "${g.kalshi.id}", polymarket: "${g.polymarket.id}", why: "" },`,
-        "```",
-      ].join("\n");
-      return `${CFG.reportUrl}?title=${encodeURIComponent("Wrong pair: " + clip(g.label, 80))}&body=${encodeURIComponent(body)}`;
+    // "Report": tells the server this automatic pair is two different questions, and hides it for this
+    // visitor straight away. Enough reports from different visitors hide it for everyone.
+    const REPORTED_KEY = "oddly.reported";
+    const reportedSet = (() => {
+      try {
+        return new Set(JSON.parse(localStorage.getItem(REPORTED_KEY) || "[]"));
+      } catch {
+        return new Set();
+      }
+    })();
+    function flash(msg) {
+      const el = $("flash");
+      if (!el) return;
+      el.textContent = msg;
+      el.classList.add("on");
+      clearTimeout(flash.t);
+      flash.t = setTimeout(() => el.classList.remove("on"), 3200);
+    }
+    async function reportGap(key) {
+      const g = allGaps.find((x) => gapKey(x) === key);
+      reportedSet.add(key);
+      try {
+        localStorage.setItem(REPORTED_KEY, JSON.stringify([...reportedSet].slice(-200)));
+      } catch {
+        /* private mode: hidden until reload */
+      }
+      allGaps = allGaps.filter((x) => gapKey(x) !== key);
+      $("gapsMeta").textContent = `${allGaps.length} ${allGaps.length === 1 ? "question" : "questions"} live on both venues`;
+      renderGapBanner();
+      renderGaps();
+      flash("Thanks. That pair is hidden for you and sent for review.");
+      try {
+        await fetch("/api/report", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ pair: key, label: g ? g.label : "" }),
+        });
+      } catch {
+        /* the pair stays hidden locally either way */
+      }
     }
     // Each gap has its own share page (/g/TICKER/slug) whose link preview is that gap's image.
     const gapKey = (g) => `${g.kalshi.id}|${g.polymarket.id}`;
@@ -388,7 +412,7 @@
       el.hidden = false;
       el.innerHTML = `<span class="lbl">Biggest gap right now</span>
         ${mpic(gapImage(g), g.label)}
-        <span class="q">${esc(g.label)}<small>Kalshi ${cents(g.kalshi.yes)} · Polymarket ${cents(g.polymarket.yes)} · cheaper on ${esc(g.cheaper)}</small></span>
+        <span class="q">${esc(g.label)}<small>Kalshi ${cents(bp(g.kalshi))} · Polymarket ${cents(bp(g.polymarket))} · cheaper on ${esc(g.cheaper)}</small></span>
         <span class="big">${(g.gap * 100).toFixed(0)}¢</span>`;
     }
 
@@ -484,15 +508,15 @@
               <div class="meta">${badge}${dateLine ? `<span>${esc(dateLine)}</span>` : ""}${g.category ? `<span>${esc(g.category)}</span>` : ""}</div>
             </div>
             <div class="prices">
-              <a class="vp${kCheap ? " cheap" : ""}" href="${esc(g.kalshi.url)}" target="_blank" rel="noopener" title="${esc(g.kalshi.question)}"><small>Kalshi${kCheap ? " · cheaper" : ""}</small><b>${ctsf(g.kalshi.yes)}</b></a>
-              <a class="vp${kCheap ? "" : " cheap"}" href="${esc(g.polymarket.url)}" target="_blank" rel="noopener" title="${esc(g.polymarket.question)}"><small>Polymarket${kCheap ? "" : " · cheaper"}</small><b>${ctsf(g.polymarket.yes)}</b></a>
+              <a class="vp${kCheap ? " cheap" : ""}" href="${esc(g.kalshi.url)}" target="_blank" rel="noopener" title="${esc(g.kalshi.question)}"><small>Kalshi${kCheap ? " · cheaper" : ""}</small><b>${ctsf(bp(g.kalshi))}</b></a>
+              <a class="vp${kCheap ? "" : " cheap"}" href="${esc(g.polymarket.url)}" target="_blank" rel="noopener" title="${esc(g.polymarket.question)}"><small>Polymarket${kCheap ? "" : " · cheaper"}</small><b>${ctsf(bp(g.polymarket))}</b></a>
             </div>
             <div class="gapbox"><b class="${pts >= 3 ? "hot" : ""}">${pts.toFixed(pts < 10 ? 1 : 0)}¢</b><small>gap</small>${history.enabled ? sparkline(history.series[gapKey(g)]) : ""}</div>
             <div class="foot">
               ${edge != null ? `<span>YES on ${esc(g.cheaper)} + NO on the other: ${edge > 0 ? `locks <b class="up">${edge.toFixed(1)}¢</b> per $1` : `<b>no lock-in</b> after the spread`}</span>` : ""}
               ${g.ruleNote ? `<span class="warn">⚠ ${esc(g.ruleNote)}</span>` : ""}
               ${isSuspect(g) ? `<span class="warn">⚠ Unusually large gap: these may be different questions. Compare the rules first.</span>` : ""}
-              <span class="act">${!g.verified && reportUrl(g) ? `<a class="btn" href="${esc(reportUrl(g))}" target="_blank" rel="noopener" title="Report a wrong pair">Report</a>` : ""}<a class="btn" href="${shareUrl(g)}" target="_blank" rel="noopener">Share</a></span>
+              <span class="act">${!g.verified ? `<button type="button" class="btn" data-report="${esc(gapKey(g))}" title="These are two different questions">Report</button>` : ""}<a class="btn" href="${shareUrl(g)}" target="_blank" rel="noopener">Share</a></span>
             </div>
             <details>
               <summary>Compare the rules ▾</summary>
@@ -511,7 +535,7 @@
       if (!allGaps.length) box.innerHTML = Array.from({ length: 3 }, () => `<div class="gcard"><span class="mpic"></span><span class="skel" style="width:70%"></span><span class="skel" style="width:180px;height:40px"></span><span class="skel" style="width:60px;height:28px"></span></div>`).join("");
       try {
         const d = await api("/api/gaps");
-        allGaps = d.gaps || [];
+        allGaps = (d.gaps || []).filter((g) => !reportedSet.has(gapKey(g)));
         loadHistory();
         const sc = d.scanned || {};
         // Kalshi lists every outcome and price level as its own market (each candidate, each BTC strike),
@@ -537,6 +561,10 @@
     bindSeg("sort", "sort", loadBoard);
     bindSeg("smartHours", "smartHours", loadSmart);
     bindSeg("gapMin", "gapMin", renderGaps);
+    $("gaps").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-report]");
+      if (b) reportGap(b.getAttribute("data-report"));
+    });
     bindSeg("venue", "venue", () => {
       firstWhaleLoad = true; // switching views shouldn't flash every row as new
       renderWhales();

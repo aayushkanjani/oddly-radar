@@ -78,6 +78,16 @@ Gap history needs somewhere to keep a snapshot every 10 minutes. An Upstash Redi
 
 If you create the database on upstash.com instead, add its REST URL and token to Vercel → Settings → Environment Variables as `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`. Without a database, everything else works as before.
 
+## "Report" on price gaps
+
+Every automatic pair has a Report button. It hides that pair for the visitor right away and sends the report to `/api/report`.
+
+- With gap history storage on (above), reports are counted once per visitor. When 3 different visitors report the same pair, it's hidden for everyone (site and Telegram). To bring one back, delete it from the Redis set `rp:blocked` in the Upstash console.
+- To get each report on Telegram, add two environment variables in Vercel (Settings → Environment Variables): `TELEGRAM_BOT_TOKEN` (the same bot token) and `REPORT_CHAT_ID` (your own numeric chat id: send any message to your bot, then open `https://api.telegram.org/bot<TOKEN>/getUpdates` and copy `chat.id`). Redeploy after adding them.
+- Every report is also written to Vercel's logs (Project → Logs, search "report:").
+
+To remove a pair for good, add the line from the Telegram message to `BLOCKED` in `lib/pairs.js`.
+
 ## Gap alert settings
 
 Gap alerts use the same bot and the `SITE_URL` variable you already set. Optional: add a repository variable `MIN_GAP_CENTS` (default `3`) to change the smallest gap that gets posted. Only confident pairs are posted (hand-verified, sports games, or automatic matches of 70% or more), each gap once, and again only if it widens by 2¢ after at least 6 hours. The first run after this update records the current gaps without posting them.
