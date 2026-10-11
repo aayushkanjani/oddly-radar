@@ -106,6 +106,28 @@ form.find input::placeholder{color:var(--faint)}
 .pcard .meta{display:flex;justify-content:space-between;gap:8px;font-size:12.5px;color:var(--muted)}
 .pcard .meta span:last-child{color:var(--ink);font-weight:600}
 
+/* smart money flow */
+.smart{margin-bottom:18px}
+.smartgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr))}
+.scard{display:grid;gap:10px;padding:18px;border-bottom:1px solid var(--line-soft);border-right:1px solid var(--line-soft);min-width:0;text-decoration:none;transition:background .15s}
+.scard:hover{background:rgba(120,149,255,.05)}
+.scard .top{display:grid;grid-template-columns:auto 42px minmax(0,1fr);gap:12px;align-items:start}
+.scard .num-rank{font:800 13px var(--mono);color:var(--faint);padding-top:2px;width:22px}
+.scard .title{font-weight:700;font-size:14.5px;line-height:1.3;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.scard .title a{text-decoration:none}
+.scard .title a:hover{text-decoration:underline}
+.scard .consensus{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.scard .count{font:800 15px var(--body)}
+.scard .count b{font:800 22px var(--mono);color:var(--mark);margin-right:4px}
+.stackav{display:flex}
+.stackav a{margin-left:-8px;border-radius:50%;box-shadow:0 0 0 2px var(--panel);text-decoration:none}
+.stackav a:first-child{margin-left:0}
+.stackav .avatar{width:28px;height:28px;flex-basis:28px;font-size:10px}
+.scard .figs{display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--muted)}
+.scard .figs b{font:700 13.5px var(--mono);color:var(--ink)}
+.scard .figs b.up{color:var(--good)}
+.smartgrid .state{grid-column:1/-1}
+
 /* panels */
 .grid{display:grid;grid-template-columns:minmax(0,1fr) 400px;gap:18px;align-items:start}
 @media (max-width:1000px){.grid{grid-template-columns:minmax(0,1fr)}}

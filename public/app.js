@@ -92,7 +92,7 @@
 
   // ---------- home page ----------
   function initHome() {
-    const st = { period: "week", sort: "pnl", min: 10000, venue: "all" };
+    const st = { period: "week", sort: "pnl", min: 10000, venue: "all", smartHours: 24 };
     const seen = new Set();
     let firstWhaleLoad = true;
     let lastBatch = { trades: [], errors: {} };
@@ -182,10 +182,22 @@
       }
     }
 
+    // Polymarket's whale trades usually arrive faster than Kalshi's, so the newest 20 can all be
+    // Polymarket. Alternate venues so both always scroll past.
+    function interleaveVenues(trades, max = 24) {
+      const pm = trades.filter((t) => t.venue !== "Kalshi");
+      const ks = trades.filter((t) => t.venue === "Kalshi");
+      const out = [];
+      while (out.length < max && (pm.length || ks.length)) {
+        if (pm.length) out.push(pm.shift());
+        if (ks.length && out.length < max) out.push(ks.shift());
+      }
+      return out;
+    }
+
     function renderTicker(trades) {
       if (!trades.length) return;
-      const items = trades
-        .slice(0, 20)
+      const items = interleaveVenues(trades)
         .map(
           (t) => `<a class="tk" href="${esc(marketUrl(t))}" target="_blank" rel="noopener"><span class="dot"></span>${venueBadge(t)}<b>${money(t.usd)}</b><span class="side ${sideClass(t)}">${sideWord(t)} ${esc(clip(t.outcome || "", 14))}</span><span>${esc(clip(t.title, 46))}</span></a>`,
         )
@@ -260,6 +272,47 @@
       }
     }
 
+    async function loadSmart() {
+      const box = $("smart");
+      box.innerHTML = Array.from({ length: 3 }, () => `<div class="scard"><span class="skel" style="width:80%"></span><span class="skel" style="width:50%;height:20px"></span><span class="skel" style="width:60%"></span></div>`).join("");
+      try {
+        const d = await api(`/api/smart?period=week&hours=${st.smartHours}&n=30`);
+        const windowWord = { 6: "6 hours", 24: "24 hours", 72: "3 days" }[st.smartHours];
+        $("smartMeta").textContent = `What the ${d.topN} most profitable traders this week bought in the last ${windowWord}` + (d.failed ? ` · ${d.failed} wallets couldn't be read` : "");
+        if (!d.markets.length) {
+          box.innerHTML = `<div class="state">No buying from the top ${d.topN} traders in the last ${windowWord}. Try a longer window.</div>`;
+          return;
+        }
+        box.innerHTML = d.markets
+          .map((m, i) => {
+            const avs = m.buyers
+              .map((b) => `<a href="${walletUrl(b.wallet)}" title="#${b.rank} ${esc(displayName(b.name, b.wallet))} · ${esc(money(b.net))}">${avatar(b.wallet, b.image)}</a>`)
+              .join("");
+            const word = m.buyerCount === 1 ? "top trader buying" : "top traders buying";
+            return `<div class="scard">
+              <div class="top">
+                <span class="num-rank">${i + 1}</span>
+                ${micon(m)}
+                <div style="min-width:0">
+                  <div class="title"><a href="${esc(marketUrl(m))}" target="_blank" rel="noopener">${esc(m.title)}</a></div>
+                  <span class="pill buy" style="margin-top:6px">${esc(m.outcome)}</span>
+                </div>
+              </div>
+              <div class="consensus"><span class="count"><b>${m.buyerCount}</b>${word}</span><span class="stackav">${avs}</span></div>
+              <div class="figs">
+                <span>Net bought <b class="up">${money(m.netUsd)}</b></span>
+                ${m.avgEntry != null ? `<span>Avg entry <b>${cents(m.avgEntry)}</b></span>` : ""}
+                <span>Last <b>${cents(m.lastPrice)}</b></span>
+                <span>${ago(m.lastTs)}</span>
+              </div>
+            </div>`;
+          })
+          .join("");
+      } catch (err) {
+        box.innerHTML = `<div class="state err">${esc(err.message)}</div>`;
+      }
+    }
+
     async function loadGaps() {
       try {
         const { gaps, pairsConfigured } = await api("/api/gaps");
@@ -290,6 +343,7 @@
 
     bindSeg("period", "period", loadBoard);
     bindSeg("sort", "sort", loadBoard);
+    bindSeg("smartHours", "smartHours", loadSmart);
     bindSeg("venue", "venue", () => {
       firstWhaleLoad = true; // switching views shouldn't flash every card as "new"
       renderWhales();
@@ -317,7 +371,12 @@
     loadBoard();
     loadPulseTop();
     loadWhales();
+    loadSmart();
     loadGaps();
+    // Smart money changes slowly; refresh it every 3 minutes, matching its cache.
+    setInterval(() => {
+      if (!document.hidden) loadSmart();
+    }, 180000);
     setInterval(() => {
       if (!document.hidden) loadWhales();
     }, REFRESH_MS);

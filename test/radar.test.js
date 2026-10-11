@@ -327,3 +327,69 @@ test("Kalshi whales stay in the feed after they scroll out of the latest page", 
   assert.deepEqual(low.map((t) => t.tx), ["kalshi:big"]);
   resetKalshiBuffer();
 });
+
+// ---- v4: Smart Money Flow ----
+import { aggregateFlow, getSmartMoney, mapLimit } from "../lib/smart.js";
+
+const sTrade = (o) => ({ side: "BUY", outcome: "Yes", size: 1000, price: 0.4, usd: 400, title: "Fed cuts?", conditionId: "c-fed", url: "https://polymarket.com/event/fed", icon: "", ts: 1000, ...o });
+
+test("aggregateFlow ranks markets by how many top traders are net buyers", () => {
+  const board = [
+    { wallet: "0xa", name: "alpha", rank: 1 },
+    { wallet: "0xb", name: "beta", rank: 2 },
+    { wallet: "0xc", name: "gamma", rank: 3 },
+  ];
+  const trades = [
+    [sTrade({ usd: 5000, size: 12500 }), sTrade({ conditionId: "c-btc", title: "BTC 120k?", usd: 90000, size: 150000 })],
+    [sTrade({ usd: 3000, size: 7500 })],
+    [sTrade({ usd: 2000, size: 5000 }), sTrade({ side: "SELL", conditionId: "c-btc", title: "BTC 120k?", usd: 1000, size: 1000 })],
+  ];
+  const out = aggregateFlow(board, trades, { since: 0 });
+  assert.equal(out[0].title, "Fed cuts?");
+  assert.equal(out[0].buyerCount, 3);
+  assert.equal(out[0].netUsd, 10000);
+  assert.equal(out[0].avgEntry.toFixed(2), "0.40");
+  assert.deepEqual(out[0].buyers.map((b) => b.rank), [1, 2, 3]);
+  // One big buyer and one seller: still listed, but after the 3-trader consensus.
+  assert.equal(out[1].title, "BTC 120k?");
+  assert.equal(out[1].buyerCount, 1);
+  assert.equal(out[1].sellerCount, 1);
+  assert.equal(out[1].netUsd, 89000);
+});
+
+test("aggregateFlow ignores old trades and markets that were net sold", () => {
+  const board = [{ wallet: "0xa", name: "a", rank: 1 }];
+  const out = aggregateFlow(board, [[sTrade({ ts: 10 }), sTrade({ conditionId: "x", side: "SELL", ts: 500 })]], { since: 100 });
+  assert.equal(out.length, 0);
+});
+
+test("mapLimit keeps at most N calls in flight and reports failures", async () => {
+  let live = 0, peak = 0;
+  const res = await mapLimit([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 3, async (n) => {
+    live++; peak = Math.max(peak, live);
+    await new Promise((r) => setTimeout(r, 5));
+    live--;
+    if (n === 4) throw new Error("boom");
+    return n * 2;
+  });
+  assert.ok(peak <= 3);
+  assert.equal(res[0].value, 2);
+  assert.equal(res[3].status, "rejected");
+});
+
+test("getSmartMoney reads each top wallet and survives a failed wallet", async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const board = [{ wallet: "0xa", name: "a", rank: 1 }, { wallet: "0xb", name: "b", rank: 2 }, { wallet: "0xc", name: "c", rank: 3 }];
+  const d = await getSmartMoney({
+    topN: 3,
+    hours: 24,
+    getBoard: async () => board,
+    getTrades: async (w) => {
+      if (w === "0xc") throw new Error("timeout");
+      return [sTrade({ ts: now - 60 })];
+    },
+  });
+  assert.equal(d.topN, 3);
+  assert.equal(d.failed, 1);
+  assert.equal(d.markets[0].buyerCount, 2);
+});
