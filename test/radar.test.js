@@ -563,3 +563,36 @@ test("Kalshi candidates from events and the flat market list are merged without 
   assert.equal(out.length, 1);
   assert.equal(out[0].url, "https://kalshi.com/markets/kxa");
 });
+
+// ---- v6.3: stat words, presidency synonym, blocked pairs (from the live Lamine Yamal pair) ----
+import { pairKey } from "../lib/match.js";
+
+test("most assists and most goals never pair, however similar the rest is", () => {
+  const p = pM("Will Lamine Yamal (Barcelona) record the most assists in the 2026-27 La Liga season?", 0.12, { endDate: "2027-05-30T00:00:00Z" });
+  const kGoals = kM("Will Lamine Yamal lead La Liga in goals for the 2026-27 season?", 0.07, { endDate: "2027-05-31T00:00:00Z" });
+  const kBoot = kM("Who will win the La Liga Golden Boot 2026-27? Lamine Yamal", 0.07, { endDate: "2027-05-31T00:00:00Z" });
+  assert.equal(matchMarkets([kGoals, kBoot], [p], { now: NOW }).pairs.length, 0);
+  // Golden Boot and "most goals" are the same contract.
+  const pGoals = pM("Will Lamine Yamal be the top scorer in the 2026-27 La Liga season?", 0.08, { endDate: "2027-05-30T00:00:00Z" });
+  assert.equal(matchMarkets([kGoals], [pGoals], { now: NOW }).pairs.length, 1);
+});
+
+test("presidency and presidential count as the same word", () => {
+  const k = kM("Will Marco Rubio be the nominee for the Presidency for the Republican party?", 0.3, { endDate: "2028-08-01T00:00:00Z" });
+  const p = pM("Will Marco Rubio win the 2028 Republican presidential nomination?", 0.33, { endDate: "2028-08-20T00:00:00Z" });
+  const { pairs } = matchMarkets([k], [p], { now: NOW });
+  assert.equal(pairs.length, 1);
+  assert.ok(pairs[0].match > 0.6, `match ${pairs[0].match} should clear the bar comfortably`);
+});
+
+test("a blocked pair is skipped and the market can pair with a better partner", () => {
+  const k = kM("Will Bayern Munich win the 2026-27 Bundesliga?", 0.6, { id: "KXBUND-27-BAY", endDate: "2027-05-20T00:00:00Z" });
+  const p1 = pM("Will Bayern Munich win the 2026-27 Bundesliga?", 0.62, { id: "bayern-bundesliga", endDate: "2027-05-20T00:00:00Z" });
+  const p2 = pM("Will Bayern Munich be the 2026-27 Bundesliga champion?", 0.63, { id: "bayern-champion", endDate: "2027-05-20T00:00:00Z" });
+  const free = matchMarkets([k], [p1, p2], { now: NOW }).pairs;
+  assert.equal(free[0].polymarket.id, "bayern-bundesliga");
+  const blocked = new Set([pairKey("kxbund-27-bay", "BAYERN-BUNDESLIGA")]);
+  const after = matchMarkets([k], [p1, p2], { now: NOW, blocked }).pairs;
+  assert.equal(after.length, 1);
+  assert.equal(after[0].polymarket.id, "bayern-champion");
+});

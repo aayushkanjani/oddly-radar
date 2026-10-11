@@ -342,6 +342,25 @@
       const handle = CFG.xHandle ? ` via @${CFG.xHandle}` : "";
       return `Same bet, two prices: "${clip(g.label, 80)}" is ${cents(g.kalshi.yes)} on Kalshi and ${cents(g.polymarket.yes)} on Polymarket. That's a ${(g.gap * 100).toFixed(0)}¢ gap${handle}`;
     }
+    // "Report" opens a pre-filled GitHub issue with a ready-to-paste line for BLOCKED in lib/pairs.js.
+    function reportUrl(g) {
+      if (!CFG.reportUrl || !/^https:\/\//.test(CFG.reportUrl)) return "";
+      const body = [
+        "This automatic pair looks wrong (two different questions).",
+        "",
+        `Kalshi: ${g.kalshi.question}`,
+        g.kalshi.url,
+        "",
+        `Polymarket: ${g.polymarket.question}`,
+        g.polymarket.url,
+        "",
+        "To remove it, add this line to BLOCKED in lib/pairs.js:",
+        "```",
+        `{ kalshi: "${g.kalshi.id}", polymarket: "${g.polymarket.id}", why: "" },`,
+        "```",
+      ].join("\n");
+      return `${CFG.reportUrl}?title=${encodeURIComponent("Wrong pair: " + clip(g.label, 80))}&body=${encodeURIComponent(body)}`;
+    }
     const shareUrl = (g) => `https://twitter.com/intent/tweet?text=${encodeURIComponent(gapShareText(g))}&url=${encodeURIComponent(location.origin + "/#gaps")}`;
 
     // Very large gaps on auto-matched pairs are more often two different questions than a real gap.
@@ -392,7 +411,7 @@
               ${edge != null ? `<span>YES on ${esc(g.cheaper)} + NO on the other: ${edge > 0 ? `locks <b class="up">${edge.toFixed(1)}¢</b> per $1` : `<b>no lock-in</b> after the spread`}</span>` : ""}
               ${g.ruleNote ? `<span class="warn">⚠ ${esc(g.ruleNote)}</span>` : ""}
               ${isSuspect(g) ? `<span class="warn">⚠ Unusually large gap: these may be different questions. Compare the rules first.</span>` : ""}
-              <span class="act"><a class="btn" href="${shareUrl(g)}" target="_blank" rel="noopener">Share</a></span>
+              <span class="act">${!g.verified && reportUrl(g) ? `<a class="btn" href="${esc(reportUrl(g))}" target="_blank" rel="noopener" title="Report a wrong pair">Report</a>` : ""}<a class="btn" href="${shareUrl(g)}" target="_blank" rel="noopener">Share</a></span>
             </div>
             <details>
               <summary>Compare the rules ▾</summary>
